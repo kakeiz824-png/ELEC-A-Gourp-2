@@ -1,0 +1,2 @@
+"""StudyDeck application package."""
+

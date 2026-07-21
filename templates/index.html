@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="StudyDeck helps students build flashcards and review them at the right time."
+    />
+    <title>{{ app_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}" />
+    <script src="{{ url_for('static', path='/app.js') }}" defer></script>
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="nav" aria-label="Primary navigation">
+        <a class="brand" href="/" aria-label="StudyDeck home">
+          <span class="brand-mark" aria-hidden="true">S</span>
+          <span>{{ app_name }}</span>
+        </a>
+        <span class="status" id="api-status">Checking API…</span>
+      </nav>
+
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Learn a little. Remember a lot.</p>
+          <h1>Flashcards that return at the right time.</h1>
+          <p class="intro">
+            Create focused study decks, review due cards, and build durable
+            knowledge with a simple spaced-repetition rhythm.
+          </p>
+          <div class="actions">
+            <button type="button" disabled>Create your first deck</button>
+            <span>Deck creation arrives in the next milestone.</span>
+          </div>
+        </div>
+
+        <aside class="preview" aria-label="Product preview">
+          <div class="preview-heading">
+            <span>Today’s review</span>
+            <span class="pill">Preview</span>
+          </div>
+          <article class="flashcard">
+            <p class="card-label">WORD</p>
+            <h2>resilient</h2>
+            <p>able to recover quickly after difficulty</p>
+          </article>
+          <div class="progress-row">
+            <span>0 of 12 reviewed</span>
+            <span>Box 1</span>
+          </div>
+          <div class="progress" aria-hidden="true"><span></span></div>
+        </aside>
+      </section>
+
+      <section class="features" aria-label="Planned features">
+        <article>
+          <span class="feature-number">01</span>
+          <h2>Build decks</h2>
+          <p>Keep vocabulary and course concepts organized by topic.</p>
+        </article>
+        <article>
+          <span class="feature-number">02</span>
+          <h2>Review what is due</h2>
+          <p>A Leitner schedule brings each card back when it matters.</p>
+        </article>
+        <article>
+          <span class="feature-number">03</span>
+          <h2>Learn from context</h2>
+          <p>Dictionary definitions and examples make new cards faster to create.</p>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>
+

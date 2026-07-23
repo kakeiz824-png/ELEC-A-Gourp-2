@@ -90,6 +90,10 @@ demoable; cover URLs are derived from the ISBN.
 
 ## Team workflow
 
+New to Git or GitHub? Read [GIT_GUIDE.md](GIT_GUIDE.md) first — it walks
+through cloning, branching, committing, pushing, opening a pull request, and
+fixing the usual mistakes, step by step.
+
 After the initial scaffold is on `main`, create a branch for every change:
 
 ```powershell

@@ -1,0 +1,50 @@
+[
+  {
+    "title": "The Hobbit",
+    "author": "J. R. R. Tolkien",
+    "isbn": "9780261103344",
+    "year": 1937
+  },
+  {
+    "title": "The Lord of the Rings",
+    "author": "J. R. R. Tolkien",
+    "isbn": "9780618640157",
+    "year": 1954
+  },
+  {
+    "title": "Nineteen Eighty-Four",
+    "author": "George Orwell",
+    "isbn": "9780451524935",
+    "year": 1949
+  },
+  {
+    "title": "Dune",
+    "author": "Frank Herbert",
+    "isbn": "9780441013593",
+    "year": 1965
+  },
+  {
+    "title": "Pride and Prejudice",
+    "author": "Jane Austen",
+    "isbn": "9780141439518",
+    "year": 1813
+  },
+  {
+    "title": "The Little Prince",
+    "author": "Antoine de Saint-Exupery",
+    "isbn": "9780156012195",
+    "year": 1943
+  },
+  {
+    "title": "Sapiens: A Brief History of Humankind",
+    "author": "Yuval Noah Harari",
+    "isbn": "9780062316097",
+    "year": 2011
+  },
+  {
+    "title": "Harry Potter and the Philosopher's Stone",
+    "author": "J. K. Rowling",
+    "isbn": "9780747532699",
+    "year": 1997
+  }
+]

@@ -1,18 +1,33 @@
-# StudyDeck
+# Shelf Life
 
-StudyDeck is a FastAPI flashcard application that will use a simplified
-Leitner spaced-repetition schedule. This repository currently contains the
-Session 1 working skeleton: a welcome page, a health endpoint, and automated
-tests.
+Shelf Life is a FastAPI personal reading tracker. Books sit on one of three
+shelves — **reading**, **finished**, **wishlist** — and can carry ratings and
+reviews. You add a book by typing **only its title**: the author, cover, year,
+and ISBN are filled in for you.
+
+This repository contains the M1 walking skeleton. The add-by-title path works
+end to end, but the lookup is backed by a seeded table
+(`seed/books.json`) rather than the live Open Library API, so the demo runs with
+no network. M2 swaps that one module for the Open Library MCP server without
+changing any caller.
 
 ## Current functionality
 
-- `GET /` renders the StudyDeck welcome page.
+- `GET /` renders the three-shelf interface.
+- `POST /books` adds a book from its title and auto-fills author, cover, year,
+  and ISBN. A failed lookup still saves the book, flagged `details_pending`.
+- `GET /books` lists books, optionally filtered by `?shelf=`.
+- `GET /books/{id}` returns one book with its reviews.
+- `PATCH /books/{id}/shelf` moves a book between shelves.
+- `POST /books/{id}/enrich` retries the lookup for a pending book.
+- `DELETE /books/{id}` deletes a book; its reviews cascade.
+- `POST /books/{id}/reviews` and `GET /books/{id}/reviews` handle ratings (1–5)
+  and optional review text.
+- `GET /stats` returns counts per shelf, review count, and average rating.
 - `GET /health` returns the application status as JSON.
-- The test suite verifies both endpoints.
 
-Database models, deck and card CRUD, the review scheduler, and the MCP
-Dictionary integration will be added in later milestones.
+The Open Library MCP server, the live lookup, and deployment come in later
+milestones.
 
 ## Requirements
 
@@ -40,15 +55,38 @@ Start the development server:
 python -m uvicorn app.main:app --reload
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in a browser. The health
-endpoint is available at
-[http://127.0.0.1:8000/health](http://127.0.0.1:8000/health).
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in a browser and type
+`The Hobbit` into the add box. Interactive API docs are at
+[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs), and the health
+endpoint at [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health).
+
+## Configuration
+
+Both settings are optional and read from the environment.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `SHELF_LIFE_DB` | `shelf_life.db` in the repository root | SQLite database file |
+| `SHELF_LIFE_ORIGINS` | `http://127.0.0.1:8000,http://localhost:8000` | Comma-separated CORS allowlist |
+
+The database file is created on startup and is git-ignored.
 
 ## Run the tests
 
 ```powershell
 python -m pytest
 ```
+
+The suite covers book CRUD, shelf moves, review validation, the delete cascade,
+statistics, the lookup-outage fallback, and the demo-input test asserting that
+`The Hobbit` resolves to J. R. R. Tolkien with a non-empty cover URL.
+
+## Seeded titles
+
+`seed/books.json` holds the titles the M1 lookup can resolve. Lookup ignores
+case, surrounding space, and punctuation, and will match a partial title, so
+`the hobbit` and `sapiens` both work. Add an entry there to make another title
+demoable; cover URLs are derived from the ISBN.
 
 ## Team workflow
 
@@ -65,7 +103,7 @@ review. Do not commit directly to `main` after the initial scaffold.
 ## Milestones
 
 - **M1 Foundation:** working skeleton, design document, AI instructions, and
-  Deck/Card CRUD backed by a database.
-- **M2 Integration:** MCP Dictionary server, tests, and security scan.
+  Book/Review CRUD backed by a database with a seeded lookup.
+- **M2 Integration:** Open Library MCP server, live lookup, tests, and security
+  scan.
 - **M3 Ship It:** deployed application, completed README, and reflection.
-

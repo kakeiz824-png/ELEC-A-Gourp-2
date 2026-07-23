@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="StudyDeck helps students build flashcards and review them at the right time."
+      content="Shelf Life is a personal reading tracker. Type a title and the author, cover, and year fill themselves in."
     />
     <title>{{ app_name }}</title>
     <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}" />
@@ -14,63 +14,129 @@
   <body>
     <main class="shell">
       <nav class="nav" aria-label="Primary navigation">
-        <a class="brand" href="/" aria-label="StudyDeck home">
-          <span class="brand-mark" aria-hidden="true">S</span>
+        <a class="brand" href="/" aria-label="Shelf Life home">
+          <span class="brand-mark" aria-hidden="true">SL</span>
           <span>{{ app_name }}</span>
         </a>
         <span class="status" id="api-status">Checking API…</span>
       </nav>
 
       <section class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">Learn a little. Remember a lot.</p>
-          <h1>Flashcards that return at the right time.</h1>
-          <p class="intro">
-            Create focused study decks, review due cards, and build durable
-            knowledge with a simple spaced-repetition rhythm.
-          </p>
-          <div class="actions">
-            <button type="button" disabled>Create your first deck</button>
-            <span>Deck creation arrives in the next milestone.</span>
-          </div>
-        </div>
+        <p class="eyebrow">Type a title. Keep the rest.</p>
+        <h1>Your reading, on three shelves.</h1>
+        <p class="intro">
+          Add a book by typing only its title — the author, cover, and year are
+          filled in for you. Move it between reading, finished, and wishlist as
+          you go.
+        </p>
 
-        <aside class="preview" aria-label="Product preview">
-          <div class="preview-heading">
-            <span>Today’s review</span>
-            <span class="pill">Preview</span>
-          </div>
-          <article class="flashcard">
-            <p class="card-label">WORD</p>
-            <h2>resilient</h2>
-            <p>able to recover quickly after difficulty</p>
-          </article>
-          <div class="progress-row">
-            <span>0 of 12 reviewed</span>
-            <span>Box 1</span>
-          </div>
-          <div class="progress" aria-hidden="true"><span></span></div>
-        </aside>
+        <form class="add-form" id="add-form" autocomplete="off">
+          <label class="visually-hidden" for="title-input">Book title</label>
+          <input
+            id="title-input"
+            name="title"
+            type="text"
+            maxlength="300"
+            required
+            placeholder="e.g. The Hobbit"
+            aria-describedby="add-hint"
+          />
+          <label class="visually-hidden" for="shelf-select">Shelf</label>
+          <select id="shelf-select" name="shelf">
+            <option value="reading" selected>Reading</option>
+            <option value="finished">Finished</option>
+            <option value="wishlist">Wishlist</option>
+          </select>
+          <button type="submit" id="add-button">Add book</button>
+        </form>
+        <p class="hint" id="add-hint" role="status">
+          Only the title is needed. Everything else is looked up.
+        </p>
       </section>
 
-      <section class="features" aria-label="Planned features">
-        <article>
-          <span class="feature-number">01</span>
-          <h2>Build decks</h2>
-          <p>Keep vocabulary and course concepts organized by topic.</p>
-        </article>
-        <article>
-          <span class="feature-number">02</span>
-          <h2>Review what is due</h2>
-          <p>A Leitner schedule brings each card back when it matters.</p>
-        </article>
-        <article>
-          <span class="feature-number">03</span>
-          <h2>Learn from context</h2>
-          <p>Dictionary definitions and examples make new cards faster to create.</p>
-        </article>
+      <section class="stats" id="stats" aria-label="Reading statistics">
+        <div><strong id="stat-total">0</strong><span>books</span></div>
+        <div><strong id="stat-reading">0</strong><span>reading</span></div>
+        <div><strong id="stat-finished">0</strong><span>finished</span></div>
+        <div><strong id="stat-wishlist">0</strong><span>wishlist</span></div>
+        <div><strong id="stat-rating">—</strong><span>avg rating</span></div>
+      </section>
+
+      <section class="shelves" aria-label="Shelves">
+        <section class="shelf" aria-labelledby="shelf-reading-heading">
+          <h2 id="shelf-reading-heading">
+            Reading <span class="count" data-count="reading">0</span>
+          </h2>
+          <ul class="book-list" id="shelf-reading"></ul>
+          <p class="empty" data-empty="reading">
+            Nothing here yet. Add a title above to start a shelf.
+          </p>
+        </section>
+
+        <section class="shelf" aria-labelledby="shelf-finished-heading">
+          <h2 id="shelf-finished-heading">
+            Finished <span class="count" data-count="finished">0</span>
+          </h2>
+          <ul class="book-list" id="shelf-finished"></ul>
+          <p class="empty" data-empty="finished">
+            Books you have finished land here.
+          </p>
+        </section>
+
+        <section class="shelf" aria-labelledby="shelf-wishlist-heading">
+          <h2 id="shelf-wishlist-heading">
+            Wishlist <span class="count" data-count="wishlist">0</span>
+          </h2>
+          <ul class="book-list" id="shelf-wishlist"></ul>
+          <p class="empty" data-empty="wishlist">
+            Books you want to read next land here.
+          </p>
+        </section>
       </section>
     </main>
+
+    <template id="book-template">
+      <li class="book">
+        <img class="cover" alt="" />
+        <div class="book-body">
+          <h3 class="book-title"></h3>
+          <p class="book-meta"></p>
+          <p class="pending" hidden>
+            Couldn’t fetch details — saved your title, tap retry later.
+          </p>
+          <p class="isbn"></p>
+          <p class="rating" hidden></p>
+          <div class="book-actions">
+            <label class="visually-hidden">Move to shelf</label>
+            <select class="move-select">
+              <option value="reading">Reading</option>
+              <option value="finished">Finished</option>
+              <option value="wishlist">Wishlist</option>
+            </select>
+            <button type="button" class="ghost review-button">Review</button>
+            <button type="button" class="ghost retry-button" hidden>Retry</button>
+            <button type="button" class="ghost danger delete-button">Delete</button>
+          </div>
+          <form class="review-form" hidden>
+            <label class="visually-hidden">Rating</label>
+            <select class="rating-select">
+              <option value="5">5 ★</option>
+              <option value="4">4 ★</option>
+              <option value="3" selected>3 ★</option>
+              <option value="2">2 ★</option>
+              <option value="1">1 ★</option>
+            </select>
+            <label class="visually-hidden">Review</label>
+            <input
+              type="text"
+              class="review-text"
+              maxlength="2000"
+              placeholder="A line about it (optional)"
+            />
+            <button type="submit" class="ghost">Save</button>
+          </form>
+        </div>
+      </li>
+    </template>
   </body>
 </html>
-

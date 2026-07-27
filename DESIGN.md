@@ -1,290 +1,443 @@
-# Shelf Life — Design Document
+# Shelf Life - Design Document
 
-## Overview
+## 1. Overview
 
-Shelf Life is a personal reading tracker. Readers organise books across three shelves —
-**reading**, **finished**, and **wishlist** — and can leave a rating and review on any book.
-The point of difference: you add a book by typing **only its title**, and the app fills in the
-author, cover image, and publication year automatically by looking the title up on the
-Open Library API. It is built for people who read enough that manual data entry (typing an
-author and hunting for a cover) is the thing that makes them stop tracking their reading.
+Shelf Life is a personal reading tracker. Readers organize books across three shelves:
+`reading`, `finished`, and `wishlist`. They can add ratings and optional review text,
+view reading statistics, and move books as their reading status changes.
 
-## Demo Contract
+The main interaction is intentionally simple: the user types only a title, and the
+application attempts to fill in the author, ISBN, cover URL, and publication year.
+M1 uses an offline catalogue in `seed/books.json`; M2 will replace that lookup backend
+with keyless Open Library tools exposed through an MCP server.
 
-- **Intended audience:** A VSP student who reads several books a term and keeps losing track
-  of which ones they have finished versus still want to read — and who will not maintain a
-  tracker that makes them type an author, ISBN, and cover URL by hand for every book.
+## 2. Demo Contract
 
-- **One-sentence problem:** Logging a book usually means typing all its metadata, and that
-  friction is enough to make people abandon reading trackers within a week.
+- **Audience:** students and hobby readers who want a lightweight way to track books.
+- **Problem:** manually entering every author, ISBN, year, and cover makes reading
+  trackers tedious to maintain.
+- **Magic moment:** the user types `The Hobbit`, presses **Add book**, and a complete
+  card appears with J. R. R. Tolkien, 1937, ISBN `9780261103344`, and a cover.
+- **Exact demo input:** title = `The Hobbit`, shelf = `reading`.
+- **Expected output:** one populated card on the Reading shelf.
+- **Additional demo actions:** add a rating and review, move the book to Finished,
+  refresh the page, and confirm the data persists.
+- **Failure behavior:** if lookup returns no match or raises an error, the title is
+  still saved with `details_pending = true`; the user can retry enrichment later.
+- **M1 reliability:** the demo title is stored in `seed/books.json`, so the demo does
+  not depend on network access.
+- **Evidence:** automated tests verify the lookup result, CRUD behavior, validation,
+  statistics, persistence behavior, and review cascade deletion.
 
-- **Magic moment:** *Given a book title typed into the "add" box, the system looks the title
-  up on Open Library, auto-fills the author, cover, and year, and the book appears on the
-  Reading shelf as a finished card — the user never types anything but the title.*
+## 3. Product Context
 
-- **Exact demo input → expected output:**
-  - **Input (typed on demo day):** `The Hobbit` in the add-book box, then press Add.
-  - **Expected output:** A book card appears on the **Reading** shelf showing
-    Title = `The Hobbit`, Author = `J. R. R. Tolkien`, Year = `1937`, ISBN = `9780261103344`,
-    and a cover thumbnail. No other fields were typed.
+### Current M1 audience
 
-- **Three screens / states you will show:**
-  1. **Empty state** — Reading shelf with no books, just the add box and a hint.
-  2. **Input / looking-up state** — user has typed `The Hobbit`, a spinner/"Looking up…" note
-     shows while Open Library is queried.
-  3. **Result state** — the fully-populated book card (cover + author + year) sitting on the
-     Reading shelf.
+M1 is a single-user personal tracker. It does not include authentication, friends,
+public profiles, or chat.
 
-- **If the external API is unavailable:** The book is **still created** using the title the
-  user typed, with a placeholder cover and the note *"Couldn't fetch details — saved your
-  title, tap retry later."* The book keeps a `details_pending` flag so it can be enriched
-  later. In addition, a small set of seeded titles (including `The Hobbit`) is cached in the
-  database so the **demo always works even with no network**.
+### Future direction
 
-- **Evidence the result is trustworthy:** An automated test feeds the literal demo input
-  (`The Hobbit`) through the lookup and asserts `author == "J. R. R. Tolkien"` and that the
-  returned cover URL is non-empty. Each auto-filled book also stores and displays its ISBN,
-  which links back to the Open Library record as a visible source citation.
+The team may extend Shelf Life into a discovery and social-reading application.
+Those features are recorded in the future roadmap, but they are not all commitments
+for M2.
 
-**Building it in stages.**
-- **M1 (walking skeleton):** The full add-by-title → auto-filled card path works end-to-end,
-  but the Open Library call is **replaced by a seeded lookup** (a small in-code table mapping
-  a handful of titles, including `The Hobbit`, to author/year/cover/ISBN). The magic moment is
-  demoable — mocked — the day M1 is due.
-- **M2 (real):** Swap the seeded lookup for the live Open Library MCP tools
-  (`search_book` / `get_book_details`), keeping the same interface so nothing else changes.
+### Existing alternatives
 
-## Current Context
+- **Goodreads:** feature-rich and social-first, but heavier than a private tracker.
+- **Spreadsheets:** flexible, but metadata and covers require manual work.
+- **Notes applications:** easy to start, but lack shelves, validation, and statistics.
 
-- **What problem does this solve?** Reading trackers fail because manual metadata entry is
-  tedious; Shelf Life removes that friction by auto-filling everything from a title.
-- **Who are the target users?** Individual readers (students, hobby readers) who want a
-  lightweight private shelf system, not a social network.
-- **What existing solutions exist and why are they insufficient?**
-  - *Goodreads* — powerful but heavy, ad-driven, and social-first; overkill for private
-    tracking and slow to add a book.
-  - *A spreadsheet* — free and flexible but every field is manual, no covers, no lookup.
-  - *Notes app* — zero structure, no shelves, ratings, or statistics.
+## 4. User Stories
 
-## Requirements
+### M1 user stories
 
-### Functional Requirements
-- [ ] Add a book by **title only**; author, cover, year, and ISBN are auto-filled via lookup.
-- [ ] Organise books across three shelves: **reading**, **finished**, **wishlist**.
-- [ ] Move a book between shelves.
-- [ ] Full CRUD on books (create, list, view, update, delete).
-- [ ] Leave a **rating (1–5)** and optional **review text** on a book; a book may have many reviews.
-- [ ] List books filtered by shelf.
-- [ ] Graceful fallback when the lookup API is unavailable (save title + `details_pending`).
-- [ ] *(Should)* Reading statistics — counts per shelf, books finished, average rating.
-- [ ] *(Should)* Display cover images.
-- [ ] *(Could)* Recommendations; CSV import from Goodreads.
+1. As a reader, I want to add a book by title so that I do not enter all metadata.
+2. As a reader, I want to choose Reading, Finished, or Wishlist when adding a book.
+3. As a reader, I want to move a book between shelves as my reading status changes.
+4. As a reader, I want to see a book's author, ISBN, year, and cover when available.
+5. As a reader, I want to rate a book from one to five.
+6. As a reader, I want to add optional review text.
+7. As a reader, I want to delete a book I no longer want to track.
+8. As a reader, I want my reviews removed automatically when their book is deleted.
+9. As a reader, I want to filter books by shelf.
+10. As a reader, I want to see totals, shelf counts, review count, and average rating.
+11. As a reader, I want an unmatched title to be saved so that lookup failure does
+    not lose my input.
+12. As a reader, I want to retry enrichment for a book whose details are pending.
 
-### Non-Functional Requirements
-- **Performance:** A book lookup + create returns in < 2 s on a normal connection; list
-  endpoints return in < 200 ms for a personal-scale library (hundreds of books, single user).
-- **Security:** All inputs validated; parameterised SQL only; no secrets in code (Open Library
-  is keyless, so there is no API key to leak); CORS restricted to the frontend origin.
-- **Accessibility:** Cover images have alt text (book title + author); the add box and shelf
-  controls are keyboard-navigable; colour is not the only signal for shelf membership.
-- **Reliability:** The app never hard-fails on an external-API outage — it degrades to
-  title-only records plus seeded samples.
+### Future user stories
 
-## Design Decisions
+1. As a reader, I want three related-book suggestions after selecting a book.
+2. As a reader, I want to browse books by fiction and nonfiction categories.
+3. As a reader, I want to search an author and view their books and biography.
+4. As a member, I want an account, friends, and chatrooms for sharing books.
+5. As a reader, I want to describe a book or my interests to an AI discovery assistant.
+6. As a reader, I want goals, points, and achievement tiers for reading challenges.
+7. As a member, I want to create shared booklists that others can discuss and rate.
+8. As a member, I want a profile with public, friends-only, and private visibility.
 
-### 1. Shelf as a field on Book, not a separate Shelf entity
+## 5. Requirements and Scope
 
-**Decision:** Model the shelf as an enum column (`reading` | `finished` | `wishlist`) on the
-`books` table rather than a separate `shelves` table with a join, because:
-- There are exactly three fixed, well-known shelves — no user-created shelves in scope.
-- It keeps the data model as simple as the handout's "steadiest option" note intends.
-- Moving a book is a single-column `PATCH`, which maps cleanly to `PATCH /books/{id}/shelf`.
+### Must Have - M1 core
 
-**Alternatives considered:**
-- *Separate `shelves` table + FK:* Rejected — adds a join and migration surface for zero
-  benefit while the shelf set is fixed.
-- *Many-to-many (a book on multiple shelves):* Rejected — a book is in exactly one reading
-  state at a time; multi-shelf contradicts the mental model.
+- [x] Add a book using a title and shelf.
+- [x] Attempt to fill author, ISBN, cover URL, and publication year.
+- [x] Organize books across `reading`, `finished`, and `wishlist`.
+- [x] List all books and filter them by shelf.
+- [x] View one book together with its reviews.
+- [x] Move a book to another shelf.
+- [x] Delete a book and cascade-delete its reviews.
+- [x] Create and list ratings with optional review text.
+- [x] Validate shelf values, title length, and rating range.
+- [x] Save unmatched titles with `details_pending`.
+- [x] Retry enrichment for a pending book.
 
-### 2. Wrap Open Library (keyless) rather than Google Books
+### Should Have - implemented in M1
 
-**Decision:** Use the **Open Library** API for title search and details because:
-- It is **keyless** — no API key to provision, store, or accidentally commit (removes a whole
-  class of security risk and matches the M1-before-keys timeline).
-- It exposes both a search endpoint and stable cover URLs by ISBN, covering the Must
-  requirements directly.
+- [x] Display cover images with a placeholder fallback.
+- [x] Show book totals, shelf counts, review count, and average rating.
+- [x] Provide a three-column browser interface.
+- [x] Provide a health endpoint and interactive FastAPI documentation.
 
-**Alternatives considered:**
-- *Google Books API:* Rejected — richer data but requires an API key and quota management.
-- *Hardcoding a book list:* Rejected — defeats the magic moment; only used as the M1 seed/mock.
+### Must Have - M2 integration
 
-### 3. Seeded/mock lookup at M1, live MCP tool at M2
+- [ ] Implement an MCP server that wraps the keyless Open Library API.
+- [ ] Expose `search_book(title)` and `get_book_details(isbn)` tools.
+- [ ] Connect the existing lookup interface to the MCP tools.
+- [ ] Preserve title-only fallback behavior during network failures.
+- [ ] Test the MCP tools using mocks rather than live network calls.
+- [ ] Run the required security scan and review the findings.
 
-**Decision:** Define one internal `lookup(title)` interface. At M1 it is backed by a seeded
-table; at M2 it is backed by the MCP server's `search_book`. The rest of the app depends only
-on the interface, so the M1→M2 swap touches one module.
+### Could Have - future roadmap
 
-## Technical Design
+- [ ] Related-book recommendation page.
+- [ ] Fiction and nonfiction category browsing.
+- [ ] Author search, work catalogue, and biography.
+- [ ] Accounts, friends, and chatrooms.
+- [ ] AI-assisted book search and recommendations.
+- [ ] Reading challenges, points, and achievement tiers.
+- [ ] Shared booklists with comments and ratings.
+- [ ] User profiles and privacy controls.
 
-### System Architecture
+The team will choose a small subset of these roadmap items only after the M2 MCP,
+testing, and security requirements are planned. Social features require authentication,
+authorization, privacy, abuse prevention, and moderation design.
 
-```
-[Frontend (index.html)] --> [API Layer (FastAPI)] --> [Database (SQLite)]
-                                                  --> [Lookup interface]
-                                                         M1: seeded table
-                                                         M2: MCP server --> Open Library API
-```
+## 6. Non-Functional Requirements
 
-### Data Models
+- **Reliability:** lookup failure must not prevent a book from being stored.
+- **Performance:** list and local CRUD operations should feel immediate for a
+  personal-scale library of hundreds of books.
+- **Security:** validate inputs, use parameterized SQL, restrict CORS, and never commit
+  credentials or environment files.
+- **Privacy:** M1 stores local single-user data. Future accounts must define ownership
+  and public, friends-only, and private visibility.
+- **Accessibility:** controls must be keyboard usable; covers need meaningful alt text;
+  color must not be the only status indicator.
+- **Testability:** automated tests must not require the real Open Library service.
+- **Maintainability:** external response formats must be converted at the lookup boundary,
+  not leaked into routers or core models.
 
-```python
-# SQLite schema
+## 7. Design Decisions
 
-books = """
-    CREATE TABLE books (
-        id              INTEGER PRIMARY KEY,
-        title           TEXT NOT NULL,
-        author          TEXT,
-        isbn            TEXT,
-        cover_url       TEXT,
-        year            INTEGER,
-        shelf           TEXT NOT NULL DEFAULT 'reading'
-                        CHECK (shelf IN ('reading', 'finished', 'wishlist')),
-        details_pending INTEGER NOT NULL DEFAULT 0,   -- 1 if lookup failed, enrich later
-        created_at      TEXT DEFAULT (datetime('now'))
-    )
-"""
+### 7.1 Shelf is a field on Book
 
-reviews = """
-    CREATE TABLE reviews (
-        id         INTEGER PRIMARY KEY,
-        book_id    INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-        rating     INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
-        text       TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
-    )
-"""
-# Relationship: one Book has many Reviews (1 --- *).
-```
+M1 has exactly three fixed shelves, so `shelf` is a validated field on `books`.
+Moving a book requires a single update and no join table.
 
-### API Endpoints
+If future shared or custom booklists are implemented, they will be modeled separately
+from the three reading-status shelves.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | /books | List books; optional `?shelf=reading\|finished\|wishlist` filter |
-| POST | /books | Add a book by title; looks up author/cover/year (Open Library) and saves |
-| GET | /books/{id} | Get one book (with its reviews) |
-| PATCH | /books/{id}/shelf | Move a book to another shelf |
-| DELETE | /books/{id} | Delete a book (cascades to its reviews) |
-| POST | /books/{id}/reviews | Add a rating + review to a book |
-| GET | /books/{id}/reviews | List reviews for a book |
-| GET | /stats | *(Should)* Reading statistics: counts per shelf, avg rating |
+### 7.2 Seeded lookup in M1, Open Library MCP in M2
 
-**`POST /books` request/response sketch:**
-```
-Request:  { "title": "The Hobbit" }
-Response: { "id": 1, "title": "The Hobbit", "author": "J. R. R. Tolkien",
-            "year": 1937, "isbn": "9780261103344",
-            "cover_url": "https://covers.openlibrary.org/b/isbn/9780261103344-M.jpg",
-            "shelf": "reading", "details_pending": false }
-```
+The application depends on one internal `lookup(title)` interface. M1 implements it
+with `seed/books.json`. M2 will replace the backend with an MCP client while keeping
+the router contract stable.
 
-### MCP Server Design
+### 7.3 Failure-safe creation
 
-**External API:** Open Library (`https://openlibrary.org`, keyless).
+Lookup is enrichment, not a prerequisite for storing a book. If enrichment fails,
+`POST /books` saves the typed title and sets `details_pending = 1`.
 
-**Tools to expose:**
-1. `search_book(title: str)` — Search Open Library by title; returns a list of candidates,
-   each `{ title, author, isbn, year, cover_url }`. Used by `POST /books` to auto-fill.
-2. `get_book_details(isbn: str)` — Fetch full details for a specific ISBN; returns
-   `{ title, author, isbn, year, cover_url, subjects }`. Used to enrich `details_pending` books.
+### 7.4 SQLite for the M1 walking skeleton
 
-**Transport:** STDIO (local) for development and the Session-5 integration.
+SQLite provides persistence, foreign keys, checks, and simple local setup. Each request
+receives its own connection, foreign keys are enabled, and SQL parameters are used.
 
-### File Structure
+### 7.5 Recommendations must match available evidence
 
-```
-shelf-life/
-├── app/
-│   ├── main.py          # FastAPI entry point
-│   ├── db.py            # SQLite schema + connection helpers
-│   ├── lookup.py        # lookup(title) interface: seeded (M1) -> MCP/Open Library (M2)
-│   ├── routers/
-│   │   ├── books.py     # /books, /books/{id}, /books/{id}/shelf
-│   │   └── reviews.py   # /books/{id}/reviews
-│   └── services/
-│       └── stats.py     # reading statistics
-├── mcp-server/
-│   └── server.py        # MCP server wrapping Open Library
-├── frontend/
-│   └── index.html       # Three-shelf web interface
-├── tests/
-│   ├── test_books.py    # CRUD + shelf move
-│   ├── test_lookup.py   # demo-input test: "The Hobbit" -> Tolkien + cover
-│   └── test_reviews.py  # rating validation, cascade delete
-├── seed/
-│   └── books.json       # seeded titles (incl. The Hobbit) for M1 + offline demo
-├── CLAUDE.md            # AI agent context
-└── README.md            # Setup and usage docs
+Early recommendations can use the same author or Open Library subjects. The product
+must not label these as "people who liked this also liked" until real user-interaction
+data exists.
+
+## 8. System Architecture
+
+```text
+[Browser: HTML/CSS/JavaScript]
+              |
+              v
+[FastAPI routes and validation]
+       |                 |
+       v                 v
+[SQLite database]   [lookup(title) boundary]
+                          |
+                  +-------+--------+
+                  |                |
+             M1 seed JSON     M2 MCP client
+                                   |
+                                   v
+                           [Open Library API]
 ```
 
-## Implementation Plan
+## 9. Data Model
 
-### Phase 1: Core Application (Week 1) — M1 walking skeleton
-- [ ] Set up project structure and CLAUDE.md
-- [ ] Implement `books` + `reviews` schema and CRUD operations
-- [ ] Build `/books`, `/books/{id}`, `/books/{id}/shelf`, review endpoints
-- [ ] Implement `lookup(title)` backed by the **seeded** table (mock Open Library)
-- [ ] Build the three-shelf frontend (empty → looking-up → result states)
-- [ ] Write the demo-input test (`The Hobbit` → Tolkien) and CRUD tests
+### Book
 
-### Phase 2: MCP Integration (Week 2) — M2 real API
-- [ ] Design and implement the MCP server (`search_book`, `get_book_details`)
-- [ ] Swap `lookup(title)` from seeded table to the live Open Library MCP tool
-- [ ] Add the API-unavailable fallback (title-only + `details_pending`)
-- [ ] Generate and review the test suite with AI
-- [ ] Run Semgrep security scan and fix findings
+| Field | Type | Rules |
+|---|---|---|
+| `id` | Integer | Primary key |
+| `title` | Text | Required, 1-300 characters after trimming |
+| `author` | Text or null | Filled by lookup when available |
+| `isbn` | Text or null | Filled by lookup when available |
+| `cover_url` | Text or null | Filled by lookup when available |
+| `year` | Integer or null | First publication year when available |
+| `shelf` | Text | `reading`, `finished`, or `wishlist` |
+| `details_pending` | Integer/Boolean | True when details still need enrichment |
+| `created_at` | Text timestamp | Assigned by SQLite |
 
-### Phase 3: Polish and Deploy (Week 3)
-- [ ] Reading statistics + cover images (Should tier)
-- [ ] Polish UI/UX (shelf transitions, alt text, keyboard nav)
-- [ ] Deploy to a hosting platform
-- [ ] Write documentation
-- [ ] Prepare presentation
+### Review
 
-## Testing Strategy
+| Field | Type | Rules |
+|---|---|---|
+| `id` | Integer | Primary key |
+| `book_id` | Integer | Foreign key to Book, cascade on delete |
+| `rating` | Integer | Required, 1-5 |
+| `text` | Text or null | Optional, maximum 2,000 characters |
+| `created_at` | Text timestamp | Assigned by SQLite |
 
-### Unit Tests
-- Each endpoint, happy path + error cases (unknown id, invalid shelf, rating out of 1–5).
-- Database operations, including `ON DELETE CASCADE` from book to reviews.
-- `lookup(title)`: the **demo-input test** asserting `The Hobbit` → author `J. R. R. Tolkien`
-  and a non-empty cover URL.
+### Relationship
 
-### Integration Tests
-- MCP server connected to the app: `POST /books {title}` results in an auto-filled record.
-- Full user workflow: add by title → move shelf (reading → finished) → add review → delete.
-- API-outage path: lookup failure yields a `details_pending` book, not a 500.
+One Book can have many Reviews. A Review belongs to exactly one Book.
 
-### Security Testing
-- Run Semgrep on all code.
-- Check for SQL injection (parameterised queries only), XSS in review text rendering,
-  and hardcoded secrets.
-- Validate all user inputs (title length, rating range, shelf enum).
+## 10. Current API
 
-## Security Considerations
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/` | Render the three-shelf interface |
+| `GET` | `/health` | Return application health |
+| `GET` | `/books` | List books; optionally filter with `?shelf=` |
+| `POST` | `/books` | Add a book and attempt lookup |
+| `GET` | `/books/{id}` | Return one book with its reviews |
+| `PATCH` | `/books/{id}/shelf` | Move a book to another shelf |
+| `POST` | `/books/{id}/enrich` | Retry lookup for a book |
+| `DELETE` | `/books/{id}` | Delete a book and its reviews |
+| `GET` | `/books/{id}/reviews` | List reviews for a book |
+| `POST` | `/books/{id}/reviews` | Add a rating and optional review |
+| `GET` | `/stats` | Return counts and average rating |
 
-- [ ] Input validation on all endpoints (title, rating 1–5, shelf enum, id existence)
-- [ ] No hardcoded secrets — Open Library is keyless; any future keys via environment variables
-- [ ] SQL parameterised queries (no string concatenation)
-- [ ] CORS restricted to the frontend origin
-- [ ] Escape/sanitise user-supplied review text before rendering (XSS)
-- [ ] Rate limiting / timeout on outbound Open Library calls; cache results to reduce calls
+M1 does not provide a general `PATCH /books/{id}` endpoint or update/delete endpoints
+for individual reviews.
 
-## References
+### Example add request
 
-- [Shelf Life project brief](https://ubc-vsp26.github.io/assets/handouts/project-ideas.pdf)
-- [Open Library API](https://openlibrary.org/developers/api)
-- [Open Library Covers API](https://openlibrary.org/dev/docs/api/covers)
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [MCP Server Quickstart](https://modelcontextprotocol.io/quickstart/server)
-- [Semgrep Getting Started](https://semgrep.dev/docs/getting-started/)
+```json
+{
+  "title": "The Hobbit",
+  "shelf": "reading"
+}
+```
+
+### Example successful response
+
+```json
+{
+  "id": 1,
+  "title": "The Hobbit",
+  "author": "J. R. R. Tolkien",
+  "isbn": "9780261103344",
+  "cover_url": "https://covers.openlibrary.org/b/isbn/9780261103344-M.jpg",
+  "year": 1937,
+  "shelf": "reading",
+  "details_pending": false,
+  "created_at": "2026-07-27 00:00:00"
+}
+```
+
+## 11. Planned M2 MCP Design
+
+### External service
+
+Open Library is keyless and provides title search, edition data, author data, subjects,
+and cover identifiers.
+
+### MCP tools
+
+1. `search_book(title: str)`
+   - Return normalized candidate summaries.
+   - Validate that the title is non-empty and bounded in length.
+   - Apply request timeout and safe error handling.
+
+2. `get_book_details(isbn: str)`
+   - Return normalized details for a selected ISBN.
+   - Validate ISBN input.
+   - Include subjects required for category and related-book features when available.
+
+### Integration boundary
+
+MCP responses will be converted into the existing `BookDetails` shape. Routers will
+continue to call `lookup(title)` and will not depend on raw Open Library JSON.
+
+### Transport
+
+Use STDIO for local development unless the course integration instructions require
+another transport.
+
+## 12. Actual M1 File Structure
+
+```text
+app/
+  __init__.py
+  db.py
+  lookup.py
+  main.py
+  models.py
+  routers/
+    __init__.py
+    books.py
+    reviews.py
+  services/
+    __init__.py
+    stats.py
+seed/
+  books.json
+static/
+  app.js
+  styles.css
+templates/
+  index.html
+tests/
+  conftest.py
+  test_books.py
+  test_lookup.py
+  test_reviews.py
+CLAUDE.md
+DESIGN.md
+GIT_GUIDE.md
+README.md
+requirements.txt
+```
+
+The `mcp-server/` directory does not exist in M1. It will be added during M2.
+
+## 13. Implementation Plan
+
+### Phase 1 - M1 walking skeleton
+
+- [x] Create project structure and AI context document.
+- [x] Create Book and Review database tables.
+- [x] Implement book creation, listing, detail, shelf move, enrichment retry, and delete.
+- [x] Implement review creation and listing.
+- [x] Implement seeded title lookup.
+- [x] Implement the three-shelf interface.
+- [x] Implement statistics and cover display.
+- [x] Add automated tests.
+- [x] Manually demonstrate add, review, shelf move, refresh persistence, and delete.
+
+### Phase 2 - M2 MCP integration
+
+- [ ] Define normalized MCP tool schemas.
+- [ ] Implement `search_book`.
+- [ ] Implement `get_book_details`.
+- [ ] Add timeouts and safe error mapping.
+- [ ] Connect the MCP client through the existing lookup boundary.
+- [ ] Mock all external calls in automated tests.
+- [ ] Run the full test suite.
+- [ ] Run Semgrep and review findings.
+
+### Phase 3 - selected extension and deployment work
+
+- [ ] Select a realistically sized subset from the eight-item future roadmap.
+- [ ] Add data models and authorization rules before building social features.
+- [ ] Complete accessibility and interface polish.
+- [ ] Deploy the application.
+- [ ] Complete README, reflection, and presentation.
+
+## 14. Testing Strategy
+
+### Current automated coverage
+
+- Book creation, listing, filtering, detail, shelf movement, enrichment, and deletion.
+- Title and shelf validation.
+- Review creation, listing, rating validation, and cascade deletion.
+- Statistics before and after data is added.
+- Seed lookup normalization, partial matching, and no-match behavior.
+- Lookup exception fallback.
+- Database connections used safely across FastAPI worker threads.
+
+The suite was locally verified with:
+
+```powershell
+..\.venv\Scripts\python.exe -m pytest --basetemp=.test-tmp
+```
+
+Result: **38 passed, 1 deprecation warning**.
+
+### M2 test requirements
+
+- Unit-test each MCP tool with mocked Open Library responses.
+- Test missing fields, empty results, invalid ISBNs, timeouts, and upstream errors.
+- Confirm external failures still create a `details_pending` book.
+- Never call the real Open Library API from the automated test suite.
+
+## 15. Security Considerations
+
+### Implemented in M1
+
+- [x] Pydantic validation for title, shelf, rating, and review length.
+- [x] SQLite checks for shelf and rating values.
+- [x] Parameterized SQL.
+- [x] Foreign-key cascade behavior.
+- [x] CORS allowlist controlled by `SHELF_LIFE_ORIGINS`.
+- [x] Browser rendering of user content through `textContent`.
+- [x] No required API key for the M1 lookup.
+
+### Required for M2
+
+- [ ] Apply outbound request timeouts.
+- [ ] Handle malformed or incomplete Open Library responses.
+- [ ] Avoid logging sensitive user-provided content unnecessarily.
+- [ ] Run Semgrep and manually review its findings.
+
+### Required before social features
+
+- [ ] Secure password storage or trusted identity-provider integration.
+- [ ] Authorization checks on every private resource.
+- [ ] Ownership rules for profiles, chatrooms, reviews, and shared lists.
+- [ ] Privacy controls and safe defaults.
+- [ ] Abuse reporting, moderation, blocking, and rate limiting.
+- [ ] Protection against spam and unauthorized data exposure.
+
+## 16. Future Roadmap Notes
+
+- **Recommendation page:** begin with author and subject similarity. Collaborative
+  recommendations require enough interaction data.
+- **Categories:** derive normalized categories from Open Library subjects rather than
+  storing an uncontrolled free-text category.
+- **Author library:** use Open Library author identifiers to avoid confusing authors
+  who share a name.
+- **AI discovery:** define provider, cost limits, prompt-injection boundaries, and
+  privacy rules before implementation.
+- **Reading rewards:** use fixed achievement thresholds first; percentile ranks only
+  become meaningful after the product has enough active users.
+- **Social functions:** accounts and authorization are prerequisites for chat,
+  profiles, shared lists, comments, and visibility controls.
+
+## 17. References
+
+- Shelf Life project brief supplied in the studio materials
+- Open Library API: `https://openlibrary.org/developers/api`
+- Open Library Covers API: `https://openlibrary.org/dev/docs/api/covers`
+- FastAPI documentation: `https://fastapi.tiangolo.com/`
+- Model Context Protocol documentation: `https://modelcontextprotocol.io/`
+- Semgrep documentation: `https://semgrep.dev/docs/`

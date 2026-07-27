@@ -1,7 +1,47 @@
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from app import openlibrary
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def offline_lookup(monkeypatch):
+    """Keep every test off the real Open Library.
+
+    Two belts: the lookup backend is pinned to the seed, and the HTTP client
+    factory raises if anything reaches for it anyway.  A test that wants to
+    exercise the Open Library path overrides both -- see ``test_openlibrary``.
+    """
+    monkeypatch.setenv("SHELF_LIFE_LOOKUP_BACKEND", "seed")
+
+    def forbidden() -> httpx.Client:
+        raise AssertionError(
+            "A test tried to reach the real Open Library. Use mock_openlibrary."
+        )
+
+    monkeypatch.setattr(openlibrary, "client", forbidden)
+
+
+@pytest.fixture()
+def mock_openlibrary(monkeypatch):
+    """Serve Open Library responses from a handler instead of the network.
+
+    Call the returned function with a handler taking an ``httpx.Request`` and
+    returning an ``httpx.Response``; it switches the lookup onto the Open
+    Library backend and routes that backend's requests to the handler.
+    """
+
+    def install(handler) -> None:
+        monkeypatch.setenv("SHELF_LIFE_LOOKUP_BACKEND", "openlibrary")
+        monkeypatch.setattr(
+            openlibrary,
+            "client",
+            lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+
+    return install
 
 
 @pytest.fixture()

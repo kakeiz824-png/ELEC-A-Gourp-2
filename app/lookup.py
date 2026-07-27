@@ -1,42 +1,56 @@
 """Title to book-metadata lookup.
 
-The rest of the application depends only on ``lookup(title)``.  At M1 it is
-backed by the seeded table in ``seed/books.json`` so the add-by-title path is
-demoable with no network.  At M2 the body is swapped for the Open Library MCP
-tools (``search_book`` / ``get_book_details``); this signature does not change,
-so no caller has to change with it.
+The rest of the application depends only on ``lookup(title)``.  Behind it sit
+two backends:
 
-``lookup`` returns ``None`` when nothing matches.  The caller stores the typed
-title with ``details_pending`` set, so a failed lookup is never a failed add.
+* ``openlibrary`` (the default) queries the live Open Library catalogue.
+* ``seed`` answers from ``seed/books.json`` alone, with no network at all.
+
+``SHELF_LIFE_LOOKUP_BACKEND`` chooses between them.  The seed is not only the
+offline demo: it is also the fallback whenever Open Library is unreachable or
+has nothing for a title, so a network outage degrades the lookup instead of
+breaking it.
+
+``lookup`` returns ``None`` when neither backend matches.  The caller stores the
+typed title with ``details_pending`` set, so a failed lookup is never a failed
+add.
 """
 
 import json
-import re
-from dataclasses import dataclass
+import logging
+import os
 from functools import lru_cache
 from pathlib import Path
 
+from app import openlibrary
+from app.details import BookDetails, cover_url_by_isbn, normalise
+
+
+__all__ = ["BookDetails", "lookup", "normalise", "search_book", "search_seed"]
+
+logger = logging.getLogger(__name__)
 
 SEED_PATH = Path(__file__).resolve().parent.parent / "seed" / "books.json"
-COVER_URL_TEMPLATE = "https://covers.openlibrary.org/b/isbn/{isbn}-M.jpg"
+
+BACKEND_ENV = "SHELF_LIFE_LOOKUP_BACKEND"
+SEED_BACKEND = "seed"
+OPENLIBRARY_BACKEND = "openlibrary"
+DEFAULT_BACKEND = OPENLIBRARY_BACKEND
 
 
-@dataclass(frozen=True)
-class BookDetails:
-    """One lookup result. Mirrors what ``search_book`` returns at M2."""
+def active_backend() -> str:
+    """Which backend is in use.
 
-    title: str
-    author: str
-    isbn: str
-    year: int
-    cover_url: str
-
-
-def normalise(title: str) -> str:
-    """Fold a title down to something two spellings of it can both reach."""
-    lowered = title.strip().lower()
-    without_punctuation = re.sub(r"[^\w\s]", "", lowered)
-    return re.sub(r"\s+", " ", without_punctuation).strip()
+    Read from the environment on every call, like ``db.get_db_path``, so a test
+    or a demo can switch backends without reimporting anything.
+    """
+    configured = os.environ.get(BACKEND_ENV, DEFAULT_BACKEND).strip().lower()
+    if configured not in (SEED_BACKEND, OPENLIBRARY_BACKEND):
+        logger.warning(
+            "Unknown %s=%r; falling back to %r", BACKEND_ENV, configured, DEFAULT_BACKEND
+        )
+        return DEFAULT_BACKEND
+    return configured
 
 
 @lru_cache(maxsize=1)
@@ -48,13 +62,13 @@ def _seed_catalogue() -> list[BookDetails]:
             author=entry["author"],
             isbn=entry["isbn"],
             year=entry["year"],
-            cover_url=COVER_URL_TEMPLATE.format(isbn=entry["isbn"]),
+            cover_url=cover_url_by_isbn(entry["isbn"]),
         )
         for entry in raw
     ]
 
 
-def search_book(title: str) -> list[BookDetails]:
+def search_seed(title: str) -> list[BookDetails]:
     """Return every seeded candidate for a title, best match first.
 
     An exact normalised match wins outright.  Otherwise a candidate matches when
@@ -79,6 +93,24 @@ def search_book(title: str) -> list[BookDetails]:
             contains.append(candidate)
 
     return exact + prefix + contains
+
+
+def search_book(title: str) -> list[BookDetails]:
+    """Search the active backend for a title, best match first.
+
+    On the Open Library backend an outage or an empty result falls through to
+    the seed, so the titles the demo relies on resolve either way.
+    """
+    if active_backend() == SEED_BACKEND:
+        return search_seed(title)
+
+    try:
+        results = openlibrary.search_book(title)
+    except openlibrary.LookupUnavailable:
+        logger.warning("Open Library unavailable for %r; using the seed", title)
+        return search_seed(title)
+
+    return results or search_seed(title)
 
 
 def lookup(title: str) -> BookDetails | None:

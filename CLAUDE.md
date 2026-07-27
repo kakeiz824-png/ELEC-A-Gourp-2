@@ -66,17 +66,32 @@
 
 ---
 
-## MCP Server Tools (Open Library Integration)
+## Open Library Integration
 
-The app connects to **Open Library** (Keyless / Public API) via an MCP server wrapping the following tools:
+The app connects to **Open Library** (keyless / public API) directly over HTTP
+from `app/openlibrary.py`, which wraps the two tools M2 specifies:
 
-1. `search_book(title: str)`
-   - Performs a title search on Open Library API.
-   - Returns top matched results with `title`, `author_name`, `first_publish_year`, `cover_i`, `isbn`.
+1. `search_book(title: str) -> list[BookDetails]`
+   - `GET https://openlibrary.org/search.json`, asking only for the fields we use
+     (`title`, `author_name`, `first_publish_year`, `isbn`, `cover_i`).
+   - Returns up to five matches in Open Library's own relevance order.
 
-2. `get_book_details(isbn: str)`
-   - Fetches precise metadata for a given ISBN.
-   - Returns detailed record including description, author, publication date, and high-res cover image URL.
+2. `get_book_details(isbn: str) -> BookDetails | None`
+   - `GET https://openlibrary.org/api/books?bibkeys=ISBN:<isbn>&jscmd=data`.
+   - Returns the single record for that ISBN, or `None` if the catalogue has none.
+
+Failure handling, in order:
+
+1. Any network error, HTTP error status, or unparseable body raises
+   `LookupUnavailable` — "the catalogue is down", as distinct from an empty
+   result meaning "no such book".
+2. `app/lookup.py` catches it and falls back to `seed/books.json`; an empty live
+   result falls back the same way.
+3. If the seed has nothing either, `lookup` returns `None` and `POST /books`
+   saves the typed title with `details_pending = 1`.
+
+An MCP server wrapping these same two functions is still open as a possible
+follow-up; the HTTP client is the thing the app actually calls today.
 
 ---
 
@@ -89,10 +104,13 @@ The app connects to **Open Library** (Keyless / Public API) via an MCP server wr
   * `lookup(title)` backed by the seeded table in `seed/books.json`, so the
     add-by-title demo runs with no network.
 
-* **Milestone 2 (M2): MCP Server & External Integration**
-  * Implement keyless Open Library MCP wrapper server (`search_book`, `get_book_details`).
-  * Connect `POST /books` flow to automatically query Open Library and auto-populate author, cover image, and publication year.
-  * Implement frontend/UI polish & reading statistics.
+* **Milestone 2 (M2): External Integration**
+  * ✅ Keyless Open Library client (`search_book`, `get_book_details`) in
+    `app/openlibrary.py`, with the seed kept as the outage fallback.
+  * ✅ `POST /books` and `POST /books/{id}/enrich` query the live catalogue and
+    auto-populate author, cover image, publication year, and ISBN.
+  * Remaining: frontend/UI polish; an MCP server over the same two functions if
+    the demo calls for one.
 
 ---
 
@@ -133,12 +151,14 @@ app/
   main.py            FastAPI entry point: /, /stats, /health
   db.py              SQLite schema and connection helpers
   models.py          Pydantic request/response models
-  lookup.py          lookup(title): seeded at M1 -> MCP/Open Library at M2
+  details.py         BookDetails: the value type both lookup backends return
+  openlibrary.py     live Open Library HTTP client (search_book, get_book_details)
+  lookup.py          lookup(title): picks a backend, seed as the fallback
   routers/books.py   /books endpoints
   routers/reviews.py /books/{id}/reviews endpoints
   services/stats.py  reading statistics
-seed/books.json      seeded titles for M1 and the offline demo
+seed/books.json      seeded titles for the offline demo and the outage fallback
 templates/index.html three-shelf interface
 static/              styles.css, app.js
-tests/               test_books.py, test_lookup.py, test_reviews.py
+tests/               test_books.py, test_lookup.py, test_openlibrary.py, test_reviews.py
 ```

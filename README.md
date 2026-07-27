@@ -2,7 +2,7 @@ Shelf Life Project Guide
 
 ## Project Overview
 
-**Shelf Life** is a personal reading tracker that organizes books across three shelves: `reading`, `finished`, and `wishlist`. It includes ratings, optional review text, reading statistics, and automated book-detail enrichment. In M1, enrichment uses the offline seed in `seed/books.json`; the Open Library MCP integration is planned for M2.
+**Shelf Life** is a personal reading tracker that organizes books across three shelves: `reading`, `finished`, and `wishlist`. It includes ratings, optional review text, reading statistics, and automated book-detail enrichment. Enrichment queries the live Open Library API, with the offline seed in `seed/books.json` kept as the fallback when the catalogue cannot answer.
 
 ## Pitch and Core Philosophy
 
@@ -73,19 +73,38 @@ These are future roadmap candidates, not a commitment to deliver all eight in M2
 
 There is no general `PATCH /books/{id}` endpoint and there are no review update or review delete endpoints in M1.
 
-## Planned M2 MCP Tools
+## Open Library Integration
 
-M1 does not contain an MCP server and does not make live Open Library requests. M2 will add a keyless Open Library MCP server exposing:
+The application calls the keyless, public Open Library API directly over HTTP from `app/openlibrary.py`. There is no account, key, or secret to configure. Two functions are exposed:
 
 1. `search_book(title: str)`
-   - Search Open Library by title.
-   - Return matched title, authors, first publication year, cover identifier, and ISBN.
+   - `GET https://openlibrary.org/search.json`, requesting only the fields used.
+   - Returns up to five matches in Open Library's own relevance order: title, author, first publication year, a preferred 13-digit ISBN, and a cover URL.
 
 2. `get_book_details(isbn: str)`
-   - Retrieve metadata for a selected ISBN.
-   - Return normalized details such as description, author, publication date, and cover URL.
+   - `GET https://openlibrary.org/api/books?bibkeys=ISBN:<isbn>&jscmd=data`.
+   - Returns the record for that ISBN, or `None` when the catalogue has none.
 
-The MCP response shape must stay outside the core data model. The application should convert MCP results into the existing `BookDetails` format.
+The Open Library response shape stays outside the core data model: the client converts catalogue JSON into `BookDetails` (`app/details.py`) and touches nothing else.
+
+`app/lookup.py` chooses the backend and degrades in steps:
+
+1. A network error, HTTP error status, or unparseable body raises `LookupUnavailable` — "the catalogue is down", as distinct from an empty result meaning "no such book".
+2. `lookup` catches it and falls back to the seed. An empty live result falls back the same way.
+3. If the seed has nothing either, `lookup` returns `None` and `POST /books` saves the typed title with `details_pending = 1`.
+
+Adding a book therefore never fails because the catalogue is unavailable.
+
+### Configuration
+
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `SHELF_LIFE_LOOKUP_BACKEND` | `openlibrary` | `openlibrary` for the live catalogue, `seed` to stay entirely offline |
+| `SHELF_LIFE_OPENLIBRARY_TIMEOUT` | `5` | Seconds to wait for Open Library before falling back |
+
+Set `SHELF_LIFE_LOOKUP_BACKEND=seed` to demo with no network at all.
+
+An MCP server wrapping these same two functions remains a possible follow-up; the HTTP client is what the application calls today.
 
 ## Milestones
 
@@ -97,14 +116,14 @@ The MCP response shape must stay outside the core data model. The application sh
 - Three-shelf browser interface.
 - Automated tests for the current API and lookup behavior.
 
-### M2: MCP Server and External Integration
+### M2: External Integration
 
-- Implement `search_book` and `get_book_details`.
-- Connect the existing lookup interface to Open Library.
-- Preserve fallback behavior when Open Library is unavailable.
-- Add mocked MCP/network tests.
-- Run the required security scan.
-- Add only the M2 extensions agreed by the team after scope review.
+- Done: `search_book` and `get_book_details` implemented in `app/openlibrary.py`.
+- Done: the existing lookup interface connected to the live Open Library API, with no caller changed.
+- Done: fallback behavior preserved when Open Library is unavailable.
+- Done: mocked network tests; no test reaches the real catalogue.
+- Remaining: run the required security scan.
+- Remaining: add only the M2 extensions agreed by the team after scope review, and an MCP server over the same two functions if the demo calls for one.
 
 ## Technology Stack
 
@@ -120,9 +139,9 @@ The MCP response shape must stay outside the core data model. The application sh
 - Keep core models independent from external API response formats.
 - Validate shelves as `reading`, `finished`, or `wishlist`.
 - Validate ratings as integers from `1` to `5`.
-- Keep the `lookup(title)` interface stable so M1 seed lookup and the M2 MCP client are interchangeable.
+- Keep the `lookup(title)` interface stable so the seed backend and the Open Library backend are interchangeable.
 - A lookup failure must not prevent a book from being added; save it with `details_pending = 1`.
-- Never access a real external API in automated tests; use seed data or mocks.
+- Never access a real external API in automated tests; use seed data or mocks. `tests/conftest.py` enforces this: it pins the seed backend for every test and replaces the HTTP client factory with one that raises, so an accidental live call fails loudly. Tests that need the Open Library path use the `mock_openlibrary` fixture.
 - Use parameterized SQL and never build SQL through string concatenation.
 - Render user-supplied text with `textContent`, never `innerHTML`.
 - Never commit credentials, API keys, `.env` files, local databases, virtual environments, or test caches.
@@ -143,13 +162,15 @@ app/
   main.py             FastAPI entry point: /, /stats, /health
   db.py               SQLite schema and connection helpers
   models.py           Pydantic request and response models
-  lookup.py           lookup(title): M1 seed -> M2 MCP/Open Library
+  details.py          BookDetails: the value type both lookup backends return
+  openlibrary.py      live Open Library HTTP client
+  lookup.py           lookup(title): picks a backend, seed as the fallback
   routers/books.py    /books endpoints
   routers/reviews.py  /books/{id}/reviews endpoints
   services/stats.py   reading statistics
-seed/books.json       seeded titles for the M1 offline demo
+seed/books.json       seeded titles for the offline demo and outage fallback
 templates/index.html  three-shelf interface
 static/styles.css     interface styling
 static/app.js         browser behavior and API calls
-tests/                API and lookup tests
+tests/                API, lookup, and Open Library tests
 ```

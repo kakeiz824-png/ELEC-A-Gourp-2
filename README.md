@@ -1,4 +1,4 @@
-# CLAUDE.md - Shelf Life Project Guide
+Shelf Life Project Guide
 
 ## Project Overview
 

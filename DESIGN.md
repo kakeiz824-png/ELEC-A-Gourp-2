@@ -417,11 +417,12 @@ The earlier M1 seed-only snapshot was locally verified with:
 ..\.venv\Scripts\python.exe -m pytest --basetemp=.test-tmp
 ```
 
-Earlier result: **38 passed, 1 deprecation warning**.
+The earlier M1 seed-only snapshot passed **38 tests with 1 deprecation warning**.
 
-The current repository also contains `tests/test_openlibrary.py`. The latest full-suite
-result has not yet been recorded in this document. Run the current GitHub version and
-replace this note with the actual result; do not reuse the older total.
+Final verification of the current GitHub `main` was completed on July 28, 2026,
+using Python 3.13.2 at commit `bb8f350`. The full suite passed **59 tests with
+1 StarletteDeprecationWarning**. The live Open Library lookup and the complete
+browser workflow were also verified manually.
 
 ### M2 test requirements
 

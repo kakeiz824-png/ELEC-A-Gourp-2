@@ -8,8 +8,11 @@ view reading statistics, and move books as their reading status changes.
 
 The main interaction is intentionally simple: the user types only a title, and the
 application attempts to fill in the author, ISBN, cover URL, and publication year.
-M1 uses an offline catalogue in `seed/books.json`; M2 will replace that lookup backend
-with keyless Open Library tools exposed through an MCP server.
+The current application calls the keyless Open Library API directly through
+`app/openlibrary.py` and falls back to `seed/books.json` when the live catalogue is
+unavailable or has no match. The course-required MCP server has not been implemented
+yet. M2 will expose the same lookup capabilities through MCP while preserving the
+current normalization and fallback behavior.
 
 ## 2. Demo Contract
 
@@ -24,8 +27,10 @@ with keyless Open Library tools exposed through an MCP server.
   refresh the page, and confirm the data persists.
 - **Failure behavior:** if lookup returns no match or raises an error, the title is
   still saved with `details_pending = true`; the user can retry enrichment later.
-- **M1 reliability:** the demo title is stored in `seed/books.json`, so the demo does
-  not depend on network access.
+- **Normal demo mode:** the default `openlibrary` backend retrieves live metadata and
+  uses the seed catalogue as a fallback.
+- **Reliable offline demo mode:** set `SHELF_LIFE_LOOKUP_BACKEND=seed`. The demo title
+  is stored in `seed/books.json`, so this mode does not depend on network access.
 - **Evidence:** automated tests verify the lookup result, CRUD behavior, validation,
   statistics, persistence behavior, and review cascade deletion.
 
@@ -66,6 +71,23 @@ for M2.
     not lose my input.
 12. As a reader, I want to retry enrichment for a book whose details are pending.
 
+### M1 acceptance criteria
+
+| Story | Done when |
+|---|---|
+| Add a book by title | A valid title and shelf create one stored book; a blank or overlong title is rejected. |
+| Choose a shelf | `reading`, `finished`, and `wishlist` are accepted; any other value is rejected. |
+| Move a book | The selected book appears on the new shelf; a missing book returns 404. |
+| View metadata | Author, ISBN, year, and cover are shown when lookup supplies them. |
+| Add a rating | Ratings from 1 to 5 are stored; values outside that range are rejected. |
+| Add optional review text | A rating can be saved with or without text; overlong text is rejected. |
+| Delete a book | The selected book is no longer returned after deletion. |
+| Cascade reviews | Deleting a book also removes every review belonging to it. |
+| Filter by shelf | `GET /books?shelf=...` returns only books on the requested shelf. |
+| View statistics | Totals, shelf counts, review count, and average rating reflect stored data. |
+| Survive lookup failure | The title is saved with `details_pending = true` when no metadata source succeeds. |
+| Retry enrichment | A pending book can be looked up again and updated when metadata becomes available. |
+
 ### Future user stories
 
 1. As a reader, I want three related-book suggestions after selecting a book.
@@ -79,50 +101,51 @@ for M2.
 
 ## 5. Requirements and Scope
 
-### Must Have - M1 core
+The team confirmed this MoSCoW scope on July 28, 2026. Future changes to the current
+milestone scope should be agreed by the team and recorded in this document.
 
-- [x] Add a book using a title and shelf.
-- [x] Attempt to fill author, ISBN, cover URL, and publication year.
-- [x] Organize books across `reading`, `finished`, and `wishlist`.
-- [x] List all books and filter them by shelf.
-- [x] View one book together with its reviews.
-- [x] Move a book to another shelf.
-- [x] Delete a book and cascade-delete its reviews.
-- [x] Create and list ratings with optional review text.
-- [x] Validate shelf values, title length, and rating range.
-- [x] Save unmatched titles with `details_pending`.
-- [x] Retry enrichment for a pending book.
+### Must Have
 
-### Should Have - implemented in M1
+1. [x] **Book and shelf core:** create, read, filter, move, enrich, and delete books
+   across `reading`, `finished`, and `wishlist`.
+2. [x] **Lookup and fallback:** retrieve normalized book metadata through the current
+   direct Open Library client, fall back to `seed/books.json`, and preserve unmatched
+   titles with `details_pending`.
+3. [x] **Ratings, reviews, persistence, and validation:** store data in SQLite, validate
+   user input, and cascade-delete reviews with their book.
+4. [ ] **Required M2 MCP integration:** expose `search_book(title)` and
+   `get_book_details(isbn)` through an MCP server and connect the existing lookup
+   boundary to those tools.
+5. [ ] **Required M2 verification:** mock the MCP tools in automated tests, run the
+   full test suite, and run and review the required security scan.
 
-- [x] Display cover images with a placeholder fallback.
-- [x] Show book totals, shelf counts, review count, and average rating.
-- [x] Provide a three-column browser interface.
-- [x] Provide a health endpoint and interactive FastAPI documentation.
+### Should Have
 
-### Must Have - M2 integration
+1. [x] Display cover images with a placeholder fallback.
+2. [x] Show book totals, shelf counts, review count, and average rating.
+3. [x] Provide a usable three-column browser interface, health endpoint, and
+   interactive API documentation.
 
-- [ ] Implement an MCP server that wraps the keyless Open Library API.
-- [ ] Expose `search_book(title)` and `get_book_details(isbn)` tools.
-- [ ] Connect the existing lookup interface to the MCP tools.
-- [ ] Preserve title-only fallback behavior during network failures.
-- [ ] Test the MCP tools using mocks rather than live network calls.
-- [ ] Run the required security scan and review the findings.
+### Could Have
 
-### Could Have - future roadmap
+1. [ ] Show three related-book recommendations using author or subject similarity.
+2. [ ] Add discovery pages for normalized fiction/nonfiction categories and author
+   catalogues or biographies.
 
-- [ ] Related-book recommendation page.
-- [ ] Fiction and nonfiction category browsing.
-- [ ] Author search, work catalogue, and biography.
-- [ ] Accounts, friends, and chatrooms.
-- [ ] AI-assisted book search and recommendations.
-- [ ] Reading challenges, points, and achievement tiers.
-- [ ] Shared booklists with comments and ratings.
-- [ ] User profiles and privacy controls.
+These are M2 stretch candidates, not commitments. The team will choose a realistically
+sized extension only after the required MCP, testing, and security work is planned.
 
-The team will choose a small subset of these roadmap items only after the M2 MCP,
-testing, and security requirements are planned. Social features require authentication,
-authorization, privacy, abuse prevention, and moderation design.
+### Won't Have in the current M2 scope
+
+1. A complete account, friendship, and chatroom system.
+2. A production AI conversational search and recommendation assistant.
+3. A complete percentile leaderboard, reward economy, and achievement platform.
+4. A complete social platform containing shared lists, public profiles, comments,
+   ratings, and fine-grained privacy controls.
+
+The eight team ideas remain in the future roadmap. The Won't Have list prevents them
+from being treated as current commitments. Social and AI features require additional
+authentication, authorization, privacy, moderation, cost, and evaluation design.
 
 ## 6. Non-Functional Requirements
 
@@ -149,11 +172,12 @@ Moving a book requires a single update and no join table.
 If future shared or custom booklists are implemented, they will be modeled separately
 from the three reading-status shelves.
 
-### 7.2 Seeded lookup in M1, Open Library MCP in M2
+### 7.2 Stable lookup boundary across HTTP, seed, and future MCP
 
-The application depends on one internal `lookup(title)` interface. M1 implements it
-with `seed/books.json`. M2 will replace the backend with an MCP client while keeping
-the router contract stable.
+The application depends on one internal `lookup(title)` interface. The current default
+implementation calls Open Library directly through `app/openlibrary.py` and falls back
+to `seed/books.json`. M2 will connect an MCP client through the same lookup boundary.
+Routers must not depend on whether metadata came from direct HTTP, MCP, or the seed.
 
 ### 7.3 Failure-safe creation
 
@@ -182,12 +206,18 @@ data exists.
        v                 v
 [SQLite database]   [lookup(title) boundary]
                           |
-                  +-------+--------+
-                  |                |
-             M1 seed JSON     M2 MCP client
-                                   |
-                                   v
-                           [Open Library API]
+                  +-------+------------------+
+                  |                          |
+       [Current Open Library HTTP]   [seed/books.json fallback]
+                  |
+                  v
+          [Open Library API]
+
+Future M2 path:
+[lookup(title)] -> [MCP client] -> [Open Library MCP server]
+                                      |
+                                      v
+                              [Open Library API]
 ```
 
 ## 9. Data Model
@@ -293,15 +323,17 @@ continue to call `lookup(title)` and will not depend on raw Open Library JSON.
 Use STDIO for local development unless the course integration instructions require
 another transport.
 
-## 12. Actual M1 File Structure
+## 12. Current Repository Structure
 
 ```text
 app/
   __init__.py
   db.py
+  details.py
   lookup.py
   main.py
   models.py
+  openlibrary.py
   routers/
     __init__.py
     books.py
@@ -320,6 +352,7 @@ tests/
   conftest.py
   test_books.py
   test_lookup.py
+  test_openlibrary.py
   test_reviews.py
 CLAUDE.md
 DESIGN.md
@@ -328,7 +361,8 @@ README.md
 requirements.txt
 ```
 
-The `mcp-server/` directory does not exist in M1. It will be added during M2.
+No MCP server directory exists yet. It will be added during M2 after the team confirms
+the tool schemas and transport.
 
 ## 13. Implementation Plan
 
@@ -346,12 +380,14 @@ The `mcp-server/` directory does not exist in M1. It will be added during M2.
 
 ### Phase 2 - M2 MCP integration
 
+- [x] Implement the direct Open Library HTTP functions `search_book` and
+  `get_book_details`.
+- [x] Normalize external responses into `BookDetails`.
+- [x] Add direct HTTP timeouts, failure mapping, seed fallback, and mocked HTTP tests.
 - [ ] Define normalized MCP tool schemas.
-- [ ] Implement `search_book`.
-- [ ] Implement `get_book_details`.
-- [ ] Add timeouts and safe error mapping.
+- [ ] Expose `search_book` and `get_book_details` as MCP tools.
 - [ ] Connect the MCP client through the existing lookup boundary.
-- [ ] Mock all external calls in automated tests.
+- [ ] Add isolated mocked tests for the MCP tools and client.
 - [ ] Run the full test suite.
 - [ ] Run Semgrep and review findings.
 
@@ -372,16 +408,20 @@ The `mcp-server/` directory does not exist in M1. It will be added during M2.
 - Review creation, listing, rating validation, and cascade deletion.
 - Statistics before and after data is added.
 - Seed lookup normalization, partial matching, and no-match behavior.
-- Lookup exception fallback.
+- Direct Open Library response normalization, failures, and seed fallback.
 - Database connections used safely across FastAPI worker threads.
 
-The suite was locally verified with:
+The earlier M1 seed-only snapshot was locally verified with:
 
 ```powershell
 ..\.venv\Scripts\python.exe -m pytest --basetemp=.test-tmp
 ```
 
-Result: **38 passed, 1 deprecation warning**.
+Earlier result: **38 passed, 1 deprecation warning**.
+
+The current repository also contains `tests/test_openlibrary.py`. The latest full-suite
+result has not yet been recorded in this document. Run the current GitHub version and
+replace this note with the actual result; do not reuse the older total.
 
 ### M2 test requirements
 
@@ -392,7 +432,7 @@ Result: **38 passed, 1 deprecation warning**.
 
 ## 15. Security Considerations
 
-### Implemented in M1
+### Implemented in the current application
 
 - [x] Pydantic validation for title, shelf, rating, and review length.
 - [x] SQLite checks for shelf and rating values.
@@ -400,12 +440,15 @@ Result: **38 passed, 1 deprecation warning**.
 - [x] Foreign-key cascade behavior.
 - [x] CORS allowlist controlled by `SHELF_LIFE_ORIGINS`.
 - [x] Browser rendering of user content through `textContent`.
-- [x] No required API key for the M1 lookup.
+- [x] No required API key for Open Library.
+- [x] Timeout on outbound Open Library requests.
+- [x] Safe handling of HTTP failures and malformed or incomplete responses.
+- [x] Automated network tests use mocks instead of the live service.
 
-### Required for M2
+### Required for the M2 MCP integration
 
-- [ ] Apply outbound request timeouts.
-- [ ] Handle malformed or incomplete Open Library responses.
+- [ ] Validate MCP tool arguments and bound input sizes.
+- [ ] Review the selected MCP transport and error mapping.
 - [ ] Avoid logging sensitive user-provided content unnecessarily.
 - [ ] Run Semgrep and manually review its findings.
 

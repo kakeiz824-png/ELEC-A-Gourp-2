@@ -9,9 +9,10 @@ Shelf = Literal["reading", "finished", "wishlist"]
 
 
 class BookCreate(BaseModel):
-    """Add a book by title only; everything else is filled in by lookup."""
+    """Add a searched book; ISBN identifies the candidate the user selected."""
 
     title: str = Field(min_length=1, max_length=300)
+    isbn: str | None = Field(default=None, max_length=32)
     shelf: Shelf = "reading"
 
     @field_validator("title")
@@ -50,6 +51,14 @@ class Book(BaseModel):
     shelf: Shelf
     details_pending: bool
     created_at: str
+
+
+class BookCandidate(BaseModel):
+    title: str
+    author: str | None
+    isbn: str
+    cover_url: str | None
+    year: int | None
 
 
 class BookWithReviews(Book):

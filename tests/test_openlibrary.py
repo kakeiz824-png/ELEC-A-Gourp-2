@@ -82,6 +82,39 @@ def test_search_sends_the_title_and_asks_for_named_fields(mock_openlibrary) -> N
     assert seen["fields"] == openlibrary.SEARCH_FIELDS
 
 
+def test_search_uses_a_broad_query_when_the_title_field_has_no_match(
+    mock_openlibrary,
+) -> None:
+    requests: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        requests.append(params)
+        if "title" in params:
+            return httpx.Response(200, json={"docs": []})
+        return httpx.Response(
+            200,
+            json={
+                "docs": [
+                    {
+                        "title": "Harry Potter and the Philosopher's Stone",
+                        "author_name": ["J. K. Rowling"],
+                        "isbn": ["9780747532699"],
+                    }
+                ]
+            },
+        )
+
+    mock_openlibrary(handler)
+
+    results = openlibrary.search_book("神秘的魔法石")
+
+    assert len(requests) == 2
+    assert requests[0]["title"] == "神秘的魔法石"
+    assert requests[1]["q"] == "神秘的魔法石"
+    assert results[0].isbn == "9780747532699"
+
+
 def test_search_returns_nothing_for_a_blank_title_without_a_request(
     mock_openlibrary,
 ) -> None:
@@ -272,10 +305,10 @@ def test_add_a_book_uses_open_library(client, mock_openlibrary) -> None:
     assert body["details_pending"] is False
 
 
-def test_add_a_book_still_succeeds_when_the_catalogue_is_down(
+def test_add_a_book_is_rejected_when_the_catalogue_cannot_supply_an_isbn(
     client, mock_openlibrary
 ) -> None:
-    """An outage on an unseeded title saves the title, flagged pending."""
+    """An outage on an unseeded title must not create an ISBN-less book."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("no route to host", request=request)
@@ -284,10 +317,9 @@ def test_add_a_book_still_succeeds_when_the_catalogue_is_down(
 
     response = client.post("/books", json={"title": "A Book Nobody Seeded"})
 
-    assert response.status_code == 201
-    body = response.json()
-    assert body["title"] == "A Book Nobody Seeded"
-    assert body["details_pending"] is True
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "isbn_not_found"
+    assert client.get("/books").json() == []
 
 
 def test_unknown_backend_name_falls_back_to_the_default(monkeypatch) -> None:

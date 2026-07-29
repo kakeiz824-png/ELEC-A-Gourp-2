@@ -14,6 +14,10 @@ const addButton = document.querySelector("#add-button");
 const titleInput = document.querySelector("#title-input");
 const shelfSelect = document.querySelector("#shelf-select");
 const template = document.querySelector("#book-template");
+const searchResults = document.querySelector("#search-results");
+const searchResultsCount = document.querySelector("#search-results-count");
+const searchResultsList = document.querySelector("#search-results-list");
+const searchResultTemplate = document.querySelector("#search-result-template");
 
 /** Fetch JSON and raise on any non-2xx so callers only handle one failure path. */
 async function api(path, options = {}) {
@@ -23,7 +27,15 @@ async function api(path, options = {}) {
   });
 
   if (!response.ok) {
-    throw new Error(`${options.method || "GET"} ${path} returned ${response.status}`);
+    const body = await response.json().catch(() => null);
+    const message =
+      body?.detail?.message ||
+      (typeof body?.detail === "string" ? body.detail : null) ||
+      `${options.method || "GET"} ${path} returned ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.body = body;
+    throw error;
   }
 
   return response.status === 204 ? null : response.json();
@@ -58,6 +70,73 @@ function describe(book) {
     parts.push(String(book.year));
   }
   return parts.join(" · ") || "Details pending";
+}
+
+function describeCandidate(book) {
+  const parts = [];
+  if (book.author) {
+    parts.push(book.author);
+  }
+  if (book.year) {
+    parts.push(String(book.year));
+  }
+  return parts.join(" / ") || "Author and year unavailable";
+}
+
+function clearSearchResults() {
+  searchResultsList.replaceChildren();
+  searchResults.hidden = true;
+}
+
+function buildSearchResult(candidate, query) {
+  const node = searchResultTemplate.content.firstElementChild.cloneNode(true);
+  const cover = node.querySelector(".search-result-cover");
+  cover.src = candidate.cover_url || PLACEHOLDER_COVER;
+  cover.alt = candidate.cover_url ? `Cover of ${candidate.title}` : "";
+  cover.addEventListener("error", () => {
+    cover.src = PLACEHOLDER_COVER;
+  });
+
+  node.querySelector(".search-result-title").textContent = candidate.title;
+  node.querySelector(".search-result-meta").textContent = describeCandidate(candidate);
+  node.querySelector(".search-result-isbn").textContent = `ISBN ${candidate.isbn}`;
+
+  const chooseButton = node.querySelector(".choose-book-button");
+  chooseButton.addEventListener("click", async () => {
+    chooseButton.disabled = true;
+    setHint(`Adding "${candidate.title}"...`, "working");
+    try {
+      await api("/books", {
+        method: "POST",
+        body: JSON.stringify({
+          title: query,
+          isbn: candidate.isbn,
+          shelf: shelfSelect.value,
+        }),
+      });
+      titleInput.value = "";
+      clearSearchResults();
+      setHint("Book added. Search for another title when you are ready.");
+      await refresh();
+    } catch (error) {
+      setHint(error.message || "Could not add that book.", "error");
+    } finally {
+      chooseButton.disabled = false;
+      titleInput.focus();
+    }
+  });
+
+  return node;
+}
+
+function renderSearchResults(candidates, query) {
+  searchResultsList.replaceChildren(
+    ...candidates.map((candidate) => buildSearchResult(candidate, query)),
+  );
+  searchResultsCount.textContent = `${candidates.length} result${
+    candidates.length === 1 ? "" : "s"
+  }`;
+  searchResults.hidden = candidates.length === 0;
 }
 
 /** Build one book card. All user-supplied text goes in via textContent. */
@@ -111,7 +190,15 @@ function buildCard(book) {
   });
 
   const reviewForm = node.querySelector(".review-form");
-  node.querySelector(".review-button").addEventListener("click", () => {
+  const reviewButton = node.querySelector(".review-button");
+  const currentReview = book.reviews?.[0];
+  if (currentReview) {
+    reviewButton.textContent = "Edit review";
+    reviewForm.querySelector(".rating-select").value = String(currentReview.rating);
+    reviewForm.querySelector(".review-text").value = currentReview.text ?? "";
+  }
+
+  reviewButton.addEventListener("click", () => {
     reviewForm.hidden = !reviewForm.hidden;
     if (!reviewForm.hidden) {
       reviewForm.querySelector(".review-text").focus();
@@ -171,18 +258,22 @@ addForm.addEventListener("submit", async (event) => {
   }
 
   addButton.disabled = true;
-  setHint(`Looking up "${title}"…`, "working");
+  clearSearchResults();
+  setHint(`Searching for "${title}"…`, "working");
 
   try {
-    await api("/books", {
-      method: "POST",
-      body: JSON.stringify({ title, shelf: shelfSelect.value }),
-    });
-    titleInput.value = "";
-    setHint("Only the title is needed. Everything else is looked up.");
-    await refresh();
-  } catch (_error) {
-    setHint("Could not add that book. Check the API and try again.", "error");
+    const candidates = await api(
+      `/books/search?title=${encodeURIComponent(title)}`,
+    );
+    renderSearchResults(candidates, title);
+    setHint(
+      candidates.length > 0
+        ? "请从下面选择正确的书籍；点击候选书籍前不会加入书架。"
+        : "没有找到带 ISBN 的相关书籍，请尝试其他书名。",
+      candidates.length > 0 ? undefined : "error",
+    );
+  } catch (error) {
+    setHint(error.message || "搜索失败，请检查服务后重试。", "error");
   } finally {
     addButton.disabled = false;
     titleInput.focus();

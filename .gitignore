@@ -30,4 +30,6 @@ Thumbs.db
 tmp/
 work/
 outputs/
+.test-tmp*/
+*.log
 

@@ -122,7 +122,7 @@ def _doc_to_details(doc: object) -> BookDetails | None:
 
 
 def search_book(title: str) -> list[BookDetails]:
-    """Search Open Library by title; best match first, empty list if no match.
+    """Search Open Library by title, then fall back to its broad query.
 
     Open Library already returns its own relevance order, which is better than
     anything re-ranking here could do, so the order is left alone.
@@ -141,6 +141,16 @@ def search_book(title: str) -> list[BookDetails]:
     docs = payload.get("docs")
     if not isinstance(docs, list):
         return []
+    if not docs:
+        payload = _get_json(
+            SEARCH_URL,
+            {"q": title.strip(), "limit": SEARCH_LIMIT, "fields": SEARCH_FIELDS},
+        )
+        if not isinstance(payload, dict):
+            raise LookupUnavailable("Open Library broad search did not return an object")
+        docs = payload.get("docs")
+        if not isinstance(docs, list):
+            return []
 
     results = [_doc_to_details(doc) for doc in docs]
     return [details for details in results if details is not None]

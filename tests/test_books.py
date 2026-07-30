@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import app.routers.books as books_router
 from app.db import get_connection
+from app.details import BookDetails
 
 
 def test_health_returns_application_status(client) -> None:
@@ -50,6 +51,127 @@ def test_a_book_can_be_added_straight_to_another_shelf(client) -> None:
     assert response.json()["shelf"] == "wishlist"
 
 
+def test_search_returns_selectable_isbn_candidates_without_storing(
+    client, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        books_router,
+        "search_book",
+        lambda title: [
+            BookDetails(title="No ISBN"),
+            BookDetails(title="Edition 1", isbn="1111111111"),
+            BookDetails(title="Duplicate ISBN", isbn="111-111-111-1"),
+            BookDetails(title="Edition 2", isbn="2222222222"),
+            BookDetails(title="Edition 3", isbn="3333333333"),
+            BookDetails(title="Edition 4", isbn="4444444444"),
+            BookDetails(title="Edition 5", isbn="5555555555"),
+            BookDetails(title="Edition 6", isbn="6666666666"),
+        ],
+    )
+
+    response = client.get("/books/search", params={"title": "A title"})
+
+    assert response.status_code == 200
+    assert [book["isbn"] for book in response.json()] == [
+        "1111111111",
+        "2222222222",
+        "3333333333",
+        "4444444444",
+        "5555555555",
+    ]
+    assert client.get("/books").json() == []
+
+
+def test_the_user_selected_isbn_is_added_instead_of_the_first_candidate(
+    client, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        books_router,
+        "search_book",
+        lambda title: [
+            BookDetails(title="First Edition", author="Author One", isbn="1111111111"),
+            BookDetails(title="Chosen Edition", author="Author Two", isbn="2222222222"),
+        ],
+    )
+
+    response = client.post(
+        "/books",
+        json={"title": "Shared Title", "isbn": "222-222-222-2", "shelf": "wishlist"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["title"] == "Chosen Edition"
+    assert response.json()["author"] == "Author Two"
+    assert response.json()["isbn"] == "2222222222"
+    assert response.json()["shelf"] == "wishlist"
+
+
+def test_the_same_catalogue_book_is_not_added_to_two_shelves(client) -> None:
+    first = client.post("/books", json={"title": "The Hobbit", "shelf": "reading"})
+    duplicate = client.post(
+        "/books", json={"title": "The Hobbit", "shelf": "wishlist"}
+    )
+
+    assert first.status_code == 201
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"]["code"] == "book_exists"
+    assert duplicate.json()["detail"]["message"] == (
+        "这本书已经存在于“阅读中”书架。"
+    )
+    assert duplicate.json()["detail"]["book"]["id"] == first.json()["id"]
+    assert duplicate.json()["detail"]["book"]["shelf"] == "reading"
+    assert len(client.get("/books").json()) == 1
+
+
+def test_title_case_and_surrounding_space_do_not_create_a_duplicate(client) -> None:
+    first = client.post("/books", json={"title": "The Hobbit"})
+    duplicate = client.post("/books", json={"title": "  the hobbit  "})
+
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"]["book"]["id"] == first.json()["id"]
+    assert len(client.get("/books").json()) == 1
+
+
+def test_same_title_with_different_isbns_can_be_tracked(
+    client, monkeypatch
+) -> None:
+    results = iter(
+        (
+            BookDetails(title="Shared Title", author="Author One", isbn="1111111111"),
+            BookDetails(title="Shared Title", author="Author Two", isbn="2222222222"),
+        )
+    )
+    monkeypatch.setattr(books_router, "lookup", lambda title: next(results))
+
+    first = client.post("/books", json={"title": "Shared Title"})
+    second = client.post(
+        "/books", json={"title": "Shared Title", "shelf": "wishlist"}
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["isbn"] != second.json()["isbn"]
+    assert len(client.get("/books").json()) == 2
+
+
+def test_concurrent_adds_create_only_one_book(client) -> None:
+    def add_hobbit(shelf: str):
+        return client.post("/books", json={"title": "The Hobbit", "shelf": shelf})
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(add_hobbit, ("reading", "wishlist")))
+
+    assert sorted(response.status_code for response in responses) == [201, 409]
+    ids = {
+        response.json()["id"]
+        if response.status_code == 201
+        else response.json()["detail"]["book"]["id"]
+        for response in responses
+    }
+    assert len(ids) == 1
+    assert len(client.get("/books").json()) == 1
+
+
 def test_books_can_be_filtered_by_shelf(client) -> None:
     client.post("/books", json={"title": "The Hobbit"})
     client.post("/books", json={"title": "Dune", "shelf": "wishlist"})
@@ -67,17 +189,17 @@ def test_an_unknown_shelf_filter_is_rejected(client) -> None:
     assert response.status_code == 422
 
 
-def test_an_unknown_title_is_still_saved_as_pending(client) -> None:
+def test_an_unknown_title_is_rejected_without_an_isbn(client) -> None:
     response = client.post("/books", json={"title": "A Title Nobody Seeded"})
 
-    assert response.status_code == 201
-    book = response.json()
-    assert book["title"] == "A Title Nobody Seeded"
-    assert book["author"] is None
-    assert book["details_pending"] is True
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "isbn_not_found"
+    assert client.get("/books").json() == []
 
 
-def test_a_lookup_outage_does_not_fail_the_add(client, monkeypatch) -> None:
+def test_a_lookup_outage_does_not_create_a_book_without_an_isbn(
+    client, monkeypatch
+) -> None:
     def explode(title: str):
         raise RuntimeError("Open Library is unreachable")
 
@@ -85,19 +207,24 @@ def test_a_lookup_outage_does_not_fail_the_add(client, monkeypatch) -> None:
 
     response = client.post("/books", json={"title": "The Hobbit"})
 
-    assert response.status_code == 201
-    assert response.json()["details_pending"] is True
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "isbn_not_found"
+    assert client.get("/books").json() == []
 
 
-def test_a_pending_book_can_be_enriched_later(client, monkeypatch) -> None:
-    real_lookup = books_router.lookup
-
-    def explode(title: str):
-        raise RuntimeError("Open Library is unreachable")
-
-    monkeypatch.setattr(books_router, "lookup", explode)
-    book_id = client.post("/books", json={"title": "The Hobbit"}).json()["id"]
-    monkeypatch.setattr(books_router, "lookup", real_lookup)
+def test_a_legacy_pending_book_can_be_enriched_later(client) -> None:
+    connection = get_connection()
+    try:
+        cursor = connection.execute(
+            """
+            INSERT INTO books (title, shelf, details_pending, identity_key)
+            VALUES ('The Hobbit', 'reading', 1, 'legacy:test-pending')
+            """
+        )
+        connection.commit()
+        book_id = cursor.lastrowid
+    finally:
+        connection.close()
 
     response = client.post(f"/books/{book_id}/enrich")
 
@@ -105,6 +232,22 @@ def test_a_pending_book_can_be_enriched_later(client, monkeypatch) -> None:
     book = response.json()
     assert book["author"] == "J. R. R. Tolkien"
     assert book["details_pending"] is False
+
+
+def test_a_catalogue_result_without_an_isbn_is_rejected(
+    client, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        books_router,
+        "lookup",
+        lambda title: BookDetails(title="Real title", author="Known Author"),
+    )
+
+    response = client.post("/books", json={"title": "Real title"})
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "isbn_not_found"
+    assert client.get("/books").json() == []
 
 
 def test_a_blank_title_is_rejected(client) -> None:

@@ -2,11 +2,12 @@
 
 import sqlite3
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 
 from app.db import get_db
 from app.models import Review, ReviewCreate
 from app.routers.books import fetch_book
+from app.services.reviews import save_personal_review
 
 
 router = APIRouter(prefix="/books", tags=["reviews"])
@@ -32,17 +33,18 @@ def list_reviews(
 def create_review(
     book_id: int,
     payload: ReviewCreate,
+    response: Response,
     connection: sqlite3.Connection = Depends(get_db),
 ) -> dict:
-    """Add a rating (1-5) and optional review text to a book."""
+    """Create or update the user's rating and optional review text."""
     fetch_book(connection, book_id)
-    cursor = connection.execute(
-        "INSERT INTO reviews (book_id, rating, text) VALUES (?, ?, ?)",
-        (book_id, payload.rating, payload.text),
+    result = save_personal_review(
+        connection,
+        book_id=book_id,
+        rating=payload.rating,
+        text=payload.text,
     )
-    connection.commit()
-
-    row = connection.execute(
-        "SELECT * FROM reviews WHERE id = ?", (cursor.lastrowid,)
-    ).fetchone()
-    return dict(row)
+    response.status_code = (
+        status.HTTP_201_CREATED if result.created else status.HTTP_200_OK
+    )
+    return dict(result.row)

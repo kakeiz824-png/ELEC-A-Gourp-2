@@ -7,7 +7,7 @@ Jinja2, HTML, CSS, and vanilla JavaScript.
 
 Users can:
 
-- add a book by typing only its title;
+- search by title, review up to five ISBN-bearing matches, and select one to add;
 - organize books across `reading`, `finished`, and `wishlist`;
 - view author, ISBN, publication year, and cover information when available;
 - move and delete books;
@@ -16,20 +16,26 @@ Users can:
 
 ### Current state
 
-The M1 CRUD application is working. The application currently searches the keyless
-Open Library API directly through `app/openlibrary.py`. If the live service fails or
-returns no match, it falls back to `seed/books.json`. If neither source has a match,
-the typed title is still stored with `details_pending = true`.
+The M1 CRUD application is working. The default lookup backend now calls the
+`search_book` MCP tool through `app/mcp_client.py`. The tool uses the keyless Open
+Library client. If MCP, the live service, or the match is unavailable, the application
+falls back to `seed/books.json`. A new book is stored only when lookup supplies an
+ISBN; otherwise `POST /books` returns 404 without creating a row. The browser first
+uses `GET /books/search?title=...`; this search has no database side effects. It then
+passes the selected candidate ISBN to `POST /books`.
 
-The course-required MCP server has **not** been implemented yet. It is an M2 task.
-Do not describe the current direct HTTP client as an MCP server.
+The first course-required M2 MCP tool is implemented in `mcp_server/server.py`.
+It exposes `search_book(title)` through FastMCP over STDIO and reuses the existing
+normalized Open Library client. The FastAPI application calls the same tool through
+FastMCP's in-memory transport; `get_book_details(isbn)` remains planned. The direct
+`openlibrary` backend is diagnostic compatibility, not the default path.
 
 ### Current milestone priorities
 
 1. Keep the M1 application stable and tested.
-2. Implement the M2 Open Library MCP server and connect it through the existing
+2. Complete the M2 Open Library MCP tools and connect them through the existing
    lookup boundary.
-3. Add mocked MCP tests and run the required security scan.
+3. Extend the mocked MCP tests and run the required security scan.
 4. Add optional features only after the required M2 work is complete.
 
 ### Out of scope for the current milestone
@@ -57,9 +63,19 @@ SQLite database          lookup(title)
                               |
                     +---------+----------+
                     |                    |
-            Open Library HTTP      seed/books.json
+             MCP client adapter      seed/books.json
                     |
-          future M2 MCP boundary
+             search_book tool
+                    |
+            Open Library HTTP
+
+MCP client / Inspector
+      |
+      v
+FastMCP STDIO server
+      |
+      v
+Open Library HTTP
 ```
 
 Routes must not depend on raw Open Library responses. External data is normalized
@@ -74,11 +90,12 @@ into the internal `BookDetails` shape before it reaches the routers or database.
 | `id` | Integer | SQLite primary key |
 | `title` | Text | Required, trimmed, 1-300 characters |
 | `author` | Text or null | Filled by lookup when available |
-| `isbn` | Text or null | Filled by lookup when available |
+| `isbn` | Text or null | Required for new books; null remains possible only on legacy rows |
 | `cover_url` | Text or null | Filled by lookup when available |
 | `year` | Integer or null | First publication year when available |
 | `shelf` | Text | `reading`, `finished`, or `wishlist` |
 | `details_pending` | Boolean/integer | True when enrichment is incomplete |
+| `identity_key` | Text | Internal normalized ISBN; unique across tracked books |
 | `created_at` | Timestamp text | Assigned by SQLite |
 
 #### Review
@@ -91,7 +108,9 @@ into the internal `BookDetails` shape before it reaches the routers or database.
 | `text` | Text or null | Optional, maximum 2,000 characters |
 | `created_at` | Timestamp text | Assigned by SQLite |
 
-One Book can have many Reviews. Deleting a Book cascade-deletes its Reviews.
+Because the current application has one user, one Book has at most one Review.
+Submitting another rating or review updates that record. Deleting a Book
+cascade-deletes its Review.
 
 ### Current API
 
@@ -100,13 +119,14 @@ One Book can have many Reviews. Deleting a Book cascade-deletes its Reviews.
 | `GET` | `/` | Render the three-shelf interface |
 | `GET` | `/health` | Return application health |
 | `GET` | `/books` | List books; optionally filter with `?shelf=` |
-| `POST` | `/books` | Add a book and attempt metadata lookup |
+| `GET` | `/books/search` | Return up to five distinct ISBN-bearing candidates without storing them |
+| `POST` | `/books` | Add the selected ISBN; return 404 without an ISBN or 409 if it already exists |
 | `GET` | `/books/{id}` | Return one book with its reviews |
 | `PATCH` | `/books/{id}/shelf` | Move a book to another shelf |
 | `POST` | `/books/{id}/enrich` | Retry metadata lookup |
 | `DELETE` | `/books/{id}` | Delete a book and its reviews |
 | `GET` | `/books/{id}/reviews` | List reviews for a book |
-| `POST` | `/books/{id}/reviews` | Add a rating and optional review |
+| `POST` | `/books/{id}/reviews` | Create or update the personal rating and review |
 | `GET` | `/stats` | Return shelf and rating statistics |
 
 There is no general book-update endpoint and no update/delete endpoint for an
@@ -120,12 +140,15 @@ app/
   db.py                SQLite schema and connection helpers
   models.py            Pydantic request and response models
   details.py           Normalized BookDetails value type
-  lookup.py            Selects live/seed lookup and handles fallback
+  lookup.py            Selects MCP/direct/seed lookup and handles fallback
+  mcp_client.py        Converts MCP results into BookDetails
   openlibrary.py       Direct Open Library HTTP client
   routers/
     books.py           Book and shelf endpoints
     reviews.py         Rating and review endpoints
   services/
+    books.py           Duplicate-safe book creation
+    reviews.py         Single-user review upsert
     stats.py           Reading statistics
 seed/
   books.json           Offline catalogue and network fallback
@@ -138,8 +161,13 @@ tests/
   conftest.py
   test_books.py
   test_lookup.py
+  test_mcp_client.py
+  test_mcp_server.py
   test_openlibrary.py
   test_reviews.py
+mcp_server/
+  __init__.py
+  server.py
 ```
 
 ## 3. How to Run
@@ -183,13 +211,24 @@ permission error previously encountered by the team.
 
 Do not claim that tests pass unless the current code has actually been tested.
 
+### Start the Studio 5 MCP server
+
+MCP clients launch the server as a STDIO subprocess:
+
+```powershell
+.\.venv\Scripts\python.exe -m mcp_server.server
+```
+
+The terminal waits silently for an MCP client; this command does not open a web
+page. The initial server currently exposes only `search_book`.
+
 ### Optional configuration
 
 | Environment variable | Default | Purpose |
 |---|---|---|
 | `SHELF_LIFE_DB` | `shelf_life.db` | SQLite database path |
 | `SHELF_LIFE_ORIGINS` | localhost origins | Comma-separated CORS allowlist |
-| `SHELF_LIFE_LOOKUP_BACKEND` | `openlibrary` | Use `openlibrary` or offline `seed` |
+| `SHELF_LIFE_LOOKUP_BACKEND` | `mcp` | Use `mcp`, diagnostic `openlibrary`, or offline `seed` |
 | `SHELF_LIFE_OPENLIBRARY_TIMEOUT` | `5` | Open Library timeout in seconds |
 
 Open Library is keyless. Never add or request an API key for the current integration.
@@ -206,8 +245,12 @@ Open Library is keyless. Never add or request an API key for the current integra
 - Preserve the stable `lookup(title)` interface when adding the MCP client.
 - Validate shelf values as `reading`, `finished`, or `wishlist`.
 - Validate ratings as integers from 1 to 5.
-- Treat metadata lookup as enrichment, not a requirement for book creation.
-- If all lookup sources fail, save the title with `details_pending = true`.
+- Require lookup to supply an ISBN before creating a new book.
+- Keep one tracked row per normalized ISBN. Duplicate adds return 409 and never
+  move the existing book between shelves.
+- Allow books with the same title when their ISBNs are different.
+- Keep one personal review per book. A later submission updates the existing review.
+- If all lookup sources fail or return no ISBN, reject the add without storing a row.
 - Automated tests must not contact the real Open Library service; use mocks or seed data.
 - Render user-provided text with `textContent`, not `innerHTML`.
 - Do not commit API keys, `.env` files, virtual environments, local databases,
@@ -240,15 +283,17 @@ Open Library is keyless. Never add or request an API key for the current integra
 
 1. Keep HTTP-specific parsing and errors inside `app/openlibrary.py`.
 2. Normalize results into `BookDetails`.
-3. Preserve seed fallback and `details_pending` behavior.
+3. Preserve seed fallback and reject results that do not supply an ISBN.
 4. Mock every external response in tests.
 5. Test empty results, missing fields, timeouts, bad status codes, and malformed data.
 
 ### Add the M2 MCP server
 
-1. Expose `search_book(title)` and `get_book_details(isbn)` as MCP tools.
+1. Keep the tested `search_book(title)` tool stable and add
+   `get_book_details(isbn)`.
 2. Reuse the existing normalization and failure-handling rules.
-3. Connect the MCP client through `lookup(title)` rather than directly from a router.
+3. Keep the MCP client connected through `lookup(title)`, never directly from a
+   router.
 4. Preserve the offline seed fallback.
 5. Add isolated mocked MCP tests.
 6. Run the full test suite and the required security scan.

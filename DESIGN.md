@@ -6,29 +6,32 @@ Shelf Life is a personal reading tracker. Readers organize books across three sh
 `reading`, `finished`, and `wishlist`. They can add ratings and optional review text,
 view reading statistics, and move books as their reading status changes.
 
-The main interaction is intentionally simple: the user types only a title, and the
-application attempts to fill in the author, ISBN, cover URL, and publication year.
-The current application calls the keyless Open Library API directly through
-`app/openlibrary.py` and falls back to `seed/books.json` when the live catalogue is
-unavailable or has no match. The course-required MCP server has not been implemented
-yet. M2 will expose the same lookup capabilities through MCP while preserving the
-current normalization and fallback behavior.
+The main interaction is intentionally simple: the user types only a title, reviews
+up to five ISBN-bearing catalogue matches, and selects the correct edition. Nothing
+is stored until the user makes that selection; the application then fills in the
+author, ISBN, cover URL, and publication year.
+The current application calls the `search_book` MCP tool through
+`app/mcp_client.py`. The MCP server reuses the keyless Open Library client and the
+application falls back to `seed/books.json` when MCP, the live catalogue, or the
+match is unavailable. A direct `openlibrary` backend remains available for focused
+diagnostics.
 
 ## 2. Demo Contract
 
 - **Audience:** students and hobby readers who want a lightweight way to track books.
 - **Problem:** manually entering every author, ISBN, year, and cover makes reading
   trackers tedious to maintain.
-- **Magic moment:** the user types `The Hobbit`, presses **Add book**, and a complete
-  card appears with J. R. R. Tolkien, 1937, ISBN `9780261103344`, and a cover.
+- **Magic moment:** the user types `The Hobbit`, presses **Search books**, selects the
+  correct result, and a complete card appears with Tolkien, 1937, an ISBN, and a cover.
 - **Exact demo input:** title = `The Hobbit`, shelf = `reading`.
-- **Expected output:** one populated card on the Reading shelf.
+- **Expected output:** the search itself changes no shelf; selecting one candidate
+  creates one populated card on the Reading shelf.
 - **Additional demo actions:** add a rating and review, move the book to Finished,
   refresh the page, and confirm the data persists.
-- **Failure behavior:** if lookup returns no match or raises an error, the title is
-  still saved with `details_pending = true`; the user can retry enrichment later.
-- **Normal demo mode:** the default `openlibrary` backend retrieves live metadata and
-  uses the seed catalogue as a fallback.
+- **Failure behavior:** if lookup and the seed fallback cannot supply an ISBN,
+  no book is stored and the interface asks the user to check the title or retry later.
+- **Normal demo mode:** the default `mcp` backend retrieves live metadata through the
+  MCP tool and uses the seed catalogue as a fallback.
 - **Reliable offline demo mode:** set `SHELF_LIFE_LOOKUP_BACKEND=seed`. The demo title
   is stored in `seed/books.json`, so this mode does not depend on network access.
 - **Evidence:** automated tests verify the lookup result, CRUD behavior, validation,
@@ -67,15 +70,22 @@ for M2.
 8. As a reader, I want my reviews removed automatically when their book is deleted.
 9. As a reader, I want to filter books by shelf.
 10. As a reader, I want to see totals, shelf counts, review count, and average rating.
-11. As a reader, I want an unmatched title to be saved so that lookup failure does
-    not lose my input.
-12. As a reader, I want to retry enrichment for a book whose details are pending.
+11. As a reader, I want a title without a verified ISBN to be rejected so that
+    unverified records are not added to my shelves.
+12. As a reader with legacy pending data, I want to retry enrichment.
+13. As a reader, I want a duplicate ISBN to be rejected so that one book cannot
+    appear on two reading-status shelves.
+14. As the single user, I want a later review submission to update my existing
+    review instead of creating another personal review.
+15. As a reader, I want to see up to five matching editions before adding a book so
+    that I can choose the correct title and ISBN.
 
 ### M1 acceptance criteria
 
 | Story | Done when |
 |---|---|
-| Add a book by title | A valid title and shelf create one stored book; a blank or overlong title is rejected. |
+| Search before adding | A valid title returns at most five distinct ISBN-bearing candidates and creates no stored row. |
+| Add a selected book | Selecting a candidate and shelf creates exactly that ISBN; a blank or overlong title is rejected. |
 | Choose a shelf | `reading`, `finished`, and `wishlist` are accepted; any other value is rejected. |
 | Move a book | The selected book appears on the new shelf; a missing book returns 404. |
 | View metadata | Author, ISBN, year, and cover are shown when lookup supplies them. |
@@ -85,8 +95,11 @@ for M2.
 | Cascade reviews | Deleting a book also removes every review belonging to it. |
 | Filter by shelf | `GET /books?shelf=...` returns only books on the requested shelf. |
 | View statistics | Totals, shelf counts, review count, and average rating reflect stored data. |
-| Survive lookup failure | The title is saved with `details_pending = true` when no metadata source succeeds. |
-| Retry enrichment | A pending book can be looked up again and updated when metadata becomes available. |
+| Reject unverifiable books | A lookup result without an ISBN returns 404 and creates no row. |
+| Retry enrichment | A legacy pending book can be looked up again and updated when an ISBN becomes available. |
+| Reject duplicate books | A normalized ISBN can have only one tracked row; a duplicate add returns 409 and leaves its current shelf unchanged. |
+| Allow same-title books | Books with the same title and different ISBNs can both be tracked. |
+| Update personal review | A book has at most one review; a later submission updates its rating and text. |
 
 ### Future user stories
 
@@ -108,14 +121,13 @@ milestone scope should be agreed by the team and recorded in this document.
 
 1. [x] **Book and shelf core:** create, read, filter, move, enrich, and delete books
    across `reading`, `finished`, and `wishlist`.
-2. [x] **Lookup and fallback:** retrieve normalized book metadata through the current
-   direct Open Library client, fall back to `seed/books.json`, and preserve unmatched
-   titles with `details_pending`.
+2. [x] **Lookup and fallback:** retrieve normalized book metadata through the MCP
+   search tool, fall back to `seed/books.json`, and require an ISBN before creation.
 3. [x] **Ratings, reviews, persistence, and validation:** store data in SQLite, validate
    user input, and cascade-delete reviews with their book.
-4. [ ] **Required M2 MCP integration:** expose `search_book(title)` and
-   `get_book_details(isbn)` through an MCP server and connect the existing lookup
-   boundary to those tools.
+4. [ ] **Required M2 MCP integration:** `search_book(title)` is exposed and connected
+   through the existing lookup boundary; `get_book_details(isbn)` remains to be
+   exposed.
 5. [ ] **Required M2 verification:** mock the MCP tools in automated tests, run the
    full test suite, and run and review the required security scan.
 
@@ -172,17 +184,20 @@ Moving a book requires a single update and no join table.
 If future shared or custom booklists are implemented, they will be modeled separately
 from the three reading-status shelves.
 
-### 7.2 Stable lookup boundary across HTTP, seed, and future MCP
+### 7.2 Stable lookup boundary across MCP, HTTP, and seed
 
-The application depends on one internal `lookup(title)` interface. The current default
-implementation calls Open Library directly through `app/openlibrary.py` and falls back
-to `seed/books.json`. M2 will connect an MCP client through the same lookup boundary.
-Routers must not depend on whether metadata came from direct HTTP, MCP, or the seed.
+The application depends on one internal `lookup(title)` interface. The default
+implementation calls `search_book` through `app/mcp_client.py`; it converts structured
+MCP data into `BookDetails` and falls back to `seed/books.json`. The direct HTTP backend
+remains available for diagnostics. Routers do not depend on whether metadata came from
+MCP, direct HTTP, or the seed.
 
 ### 7.3 Failure-safe creation
 
-Lookup is enrichment, not a prerequisite for storing a book. If enrichment fails,
-`POST /books` saves the typed title and sets `details_pending = 1`.
+Lookup is a prerequisite for storing a new book because ISBN is the product's sole
+book identity. If lookup and seed fallback cannot supply an ISBN, `POST /books`
+returns 404 and stores nothing. Existing legacy pending rows are preserved during
+database migration and can still use the enrichment endpoint.
 
 ### 7.4 SQLite for the M1 walking skeleton
 
@@ -208,16 +223,16 @@ data exists.
                           |
                   +-------+------------------+
                   |                          |
-       [Current Open Library HTTP]   [seed/books.json fallback]
+          [MCP client adapter]       [seed/books.json fallback]
+                  |
+                  v
+        [FastMCP search_book tool]
+                  |
+                  v
+        [Open Library HTTP client]
                   |
                   v
           [Open Library API]
-
-Future M2 path:
-[lookup(title)] -> [MCP client] -> [Open Library MCP server]
-                                      |
-                                      v
-                              [Open Library API]
 ```
 
 ## 9. Data Model
@@ -229,11 +244,12 @@ Future M2 path:
 | `id` | Integer | Primary key |
 | `title` | Text | Required, 1-300 characters after trimming |
 | `author` | Text or null | Filled by lookup when available |
-| `isbn` | Text or null | Filled by lookup when available |
+| `isbn` | Text or null | Required for new books; null is retained only for legacy compatibility |
 | `cover_url` | Text or null | Filled by lookup when available |
 | `year` | Integer or null | First publication year when available |
 | `shelf` | Text | `reading`, `finished`, or `wishlist` |
 | `details_pending` | Integer/Boolean | True when details still need enrichment |
+| `identity_key` | Text | Internal normalized ISBN, unique across tracked books |
 | `created_at` | Text timestamp | Assigned by SQLite |
 
 ### Review
@@ -248,7 +264,8 @@ Future M2 path:
 
 ### Relationship
 
-One Book can have many Reviews. A Review belongs to exactly one Book.
+In the current single-user application, one Book has zero or one Review. A later
+submission updates the existing Review. A Review belongs to exactly one Book.
 
 ## 10. Current API
 
@@ -257,17 +274,19 @@ One Book can have many Reviews. A Review belongs to exactly one Book.
 | `GET` | `/` | Render the three-shelf interface |
 | `GET` | `/health` | Return application health |
 | `GET` | `/books` | List books; optionally filter with `?shelf=` |
-| `POST` | `/books` | Add a book and attempt lookup |
+| `GET` | `/books/search` | Return up to five distinct ISBN-bearing candidates without storing them |
+| `POST` | `/books` | Add the selected ISBN; return 404 without an ISBN or 409 when it already exists |
 | `GET` | `/books/{id}` | Return one book with its reviews |
 | `PATCH` | `/books/{id}/shelf` | Move a book to another shelf |
 | `POST` | `/books/{id}/enrich` | Retry lookup for a book |
 | `DELETE` | `/books/{id}` | Delete a book and its reviews |
 | `GET` | `/books/{id}/reviews` | List reviews for a book |
-| `POST` | `/books/{id}/reviews` | Add a rating and optional review |
+| `POST` | `/books/{id}/reviews` | Create or update the personal rating and review |
 | `GET` | `/stats` | Return counts and average rating |
 
-M1 does not provide a general `PATCH /books/{id}` endpoint or update/delete endpoints
-for individual reviews.
+M1 does not provide a general `PATCH /books/{id}` endpoint or separate update/delete
+endpoints for an individual review. Reposting to the review collection updates the
+single user's existing review.
 
 ### Example add request
 
@@ -294,7 +313,7 @@ for individual reviews.
 }
 ```
 
-## 11. Planned M2 MCP Design
+## 11. M2 MCP Design
 
 ### External service
 
@@ -303,25 +322,56 @@ and cover identifiers.
 
 ### MCP tools
 
-1. `search_book(title: str)`
-   - Return normalized candidate summaries.
-   - Validate that the title is non-empty and bounded in length.
-   - Apply request timeout and safe error handling.
+Studio 5 requires the team to design 5-10 AI-facing tool signatures and implement
+at least one tool end to end. The initial Shelf Life catalogue tool is
+`search_book`; the remaining signatures are planned and must not be described as
+implemented until their code and tests exist.
 
-2. `get_book_details(isbn: str)`
-   - Return normalized details for a selected ISBN.
-   - Validate ISBN input.
-   - Include subjects required for category and related-book features when available.
+| Tool | When the AI should use it | Parameters | Returns |
+|---|---|---|---|
+| `search_book` | The user gives a full or partial title and wants likely matches. | `title: str` | A readable list of up to five normalized Open Library matches. |
+| `get_book_details` | The user provides an ISBN or selects one search result and wants its details. | `isbn: str` | Title, author, year, ISBN, cover, and later subject information. |
+| `list_shelf` | The user asks what is currently on one personal shelf. | `shelf: str` | Books on Reading, Finished, Wishlist, or all shelves. |
+| `get_reading_stats` | The user asks for totals, progress, reviews, or average rating. | none | Current shelf counts, review count, and average rating. |
+| `add_book` | The user explicitly asks to save a title to their tracker. | `title: str`, `shelf: str = "reading"` | The stored book and selected shelf. |
+| `move_book` | The user explicitly asks to change a tracked book's reading status. | `book_id: int`, `shelf: str` | The updated book and shelf. |
+| `add_review` | The user explicitly asks to save a rating or review for a tracked book. | `book_id: int`, `rating: int`, `text: str \| None` | The saved review. |
+
+`delete_book` is intentionally not exposed during the first MCP iteration because
+it is destructive and the course exercise has not yet defined a confirmation
+workflow for destructive tools.
+
+#### Studio 5 implemented tool
+
+`search_book(title: str)`:
+
+- trims the title and accepts 1-300 characters;
+- reuses `app.openlibrary.search_book` instead of duplicating HTTP code;
+- returns at most five formatted, AI-readable results;
+- also returns structured book data for the web application;
+- returns clear no-result and temporary-unavailable messages; and
+- does not reveal raw exceptions or Open Library response JSON.
 
 ### Integration boundary
 
-MCP responses will be converted into the existing `BookDetails` shape. Routers will
-continue to call `lookup(title)` and will not depend on raw Open Library JSON.
+`app/mcp_client.py` converts structured MCP responses into the existing
+`BookDetails` shape. Routers continue to call `lookup(title)` and do not depend on raw
+Open Library JSON or MCP response objects.
 
 ### Transport
 
-Use STDIO for local development unless the course integration instructions require
-another transport.
+Use FastMCP with STDIO for Inspector and desktop MCP clients. The local web
+application uses FastMCP's in-memory MCP transport so it exercises tool discovery,
+validation, serialization, and protocol handling without starting a new subprocess
+for every book addition.
+
+### Manual integration evidence
+
+On 2026-07-28, MCP Inspector v2 connected to the STDIO server, discovered
+`search_book`, and returned five live Open Library matches for `The Hobbit`. The
+colored Shelf Life page was then run with the default `mcp` backend; adding the same
+title produced live MCP metadata on the Reading shelf. Claude Desktop remains
+unverified because the team's new Claude account could not access the service.
 
 ## 12. Current Repository Structure
 
@@ -332,6 +382,7 @@ app/
   details.py
   lookup.py
   main.py
+  mcp_client.py
   models.py
   openlibrary.py
   routers/
@@ -352,8 +403,13 @@ tests/
   conftest.py
   test_books.py
   test_lookup.py
+  test_mcp_client.py
+  test_mcp_server.py
   test_openlibrary.py
   test_reviews.py
+mcp_server/
+  __init__.py
+  server.py
 CLAUDE.md
 DESIGN.md
 GIT_GUIDE.md
@@ -361,8 +417,9 @@ README.md
 requirements.txt
 ```
 
-No MCP server directory exists yet. It will be added during M2 after the team confirms
-the tool schemas and transport.
+The first Studio 5 server exposes `search_book` through FastMCP over STDIO. The
+FastAPI application now calls the same tool through its in-memory MCP client adapter
+and preserves seed fallback.
 
 ## 13. Implementation Plan
 
@@ -384,11 +441,14 @@ the tool schemas and transport.
   `get_book_details`.
 - [x] Normalize external responses into `BookDetails`.
 - [x] Add direct HTTP timeouts, failure mapping, seed fallback, and mocked HTTP tests.
-- [ ] Define normalized MCP tool schemas.
-- [ ] Expose `search_book` and `get_book_details` as MCP tools.
-- [ ] Connect the MCP client through the existing lookup boundary.
-- [ ] Add isolated mocked tests for the MCP tools and client.
-- [ ] Run the full test suite.
+- [x] Define seven Studio 5 MCP tool signatures.
+- [x] Expose and test `search_book` as the first end-to-end FastMCP tool.
+- [ ] Expose `get_book_details` as the second Open Library MCP tool.
+- [x] Connect the MCP client through the existing lookup boundary.
+- [x] Add isolated mocked tests for the first MCP tool.
+- [x] Add isolated mocked tests for the first MCP client adapter.
+- [ ] Add isolated mocked tests for the remaining MCP tools.
+- [x] Run the full test suite after the first MCP tool and web integration.
 - [ ] Run Semgrep and review findings.
 
 ### Phase 3 - selected extension and deployment work
@@ -427,8 +487,9 @@ browser workflow were also verified manually.
 ### M2 test requirements
 
 - Unit-test each MCP tool with mocked Open Library responses.
+- Verify `POST /books` uses normalized data returned through the MCP client.
 - Test missing fields, empty results, invalid ISBNs, timeouts, and upstream errors.
-- Confirm external failures still create a `details_pending` book.
+- Confirm external failures and ISBN-less results create no book.
 - Never call the real Open Library API from the automated test suite.
 
 ## 15. Security Considerations
@@ -448,8 +509,8 @@ browser workflow were also verified manually.
 
 ### Required for the M2 MCP integration
 
-- [ ] Validate MCP tool arguments and bound input sizes.
-- [ ] Review the selected MCP transport and error mapping.
+- [x] Validate `search_book` arguments and bound input sizes.
+- [x] Review the STDIO/in-memory MCP transports and error mapping.
 - [ ] Avoid logging sensitive user-provided content unnecessarily.
 - [ ] Run Semgrep and manually review its findings.
 

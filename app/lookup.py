@@ -1,9 +1,10 @@
 """Title to book-metadata lookup.
 
 The rest of the application depends only on ``lookup(title)``.  Behind it sit
-two backends:
+three backends:
 
-* ``openlibrary`` (the default) queries the live Open Library catalogue.
+* ``mcp`` (the default) queries Open Library through the local MCP tool.
+* ``openlibrary`` keeps the direct HTTP path available for focused diagnostics.
 * ``seed`` answers from ``seed/books.json`` alone, with no network at all.
 
 ``SHELF_LIFE_LOOKUP_BACKEND`` chooses between them.  The seed is not only the
@@ -22,8 +23,8 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-from app import openlibrary
-from app.details import BookDetails, cover_url_by_isbn, normalise
+from app import mcp_client, openlibrary
+from app.details import BookDetails, cover_url_by_isbn, normalise, normalise_isbn
 
 
 __all__ = ["BookDetails", "lookup", "normalise", "search_book", "search_seed"]
@@ -34,8 +35,9 @@ SEED_PATH = Path(__file__).resolve().parent.parent / "seed" / "books.json"
 
 BACKEND_ENV = "SHELF_LIFE_LOOKUP_BACKEND"
 SEED_BACKEND = "seed"
+MCP_BACKEND = "mcp"
 OPENLIBRARY_BACKEND = "openlibrary"
-DEFAULT_BACKEND = OPENLIBRARY_BACKEND
+DEFAULT_BACKEND = MCP_BACKEND
 
 
 def active_backend() -> str:
@@ -45,7 +47,7 @@ def active_backend() -> str:
     or a demo can switch backends without reimporting anything.
     """
     configured = os.environ.get(BACKEND_ENV, DEFAULT_BACKEND).strip().lower()
-    if configured not in (SEED_BACKEND, OPENLIBRARY_BACKEND):
+    if configured not in (SEED_BACKEND, MCP_BACKEND, OPENLIBRARY_BACKEND):
         logger.warning(
             "Unknown %s=%r; falling back to %r", BACKEND_ENV, configured, DEFAULT_BACKEND
         )
@@ -101,19 +103,30 @@ def search_book(title: str) -> list[BookDetails]:
     On the Open Library backend an outage or an empty result falls through to
     the seed, so the titles the demo relies on resolve either way.
     """
-    if active_backend() == SEED_BACKEND:
+    backend = active_backend()
+    if backend == SEED_BACKEND:
         return search_seed(title)
 
-    try:
-        results = openlibrary.search_book(title)
-    except openlibrary.LookupUnavailable:
-        logger.warning("Open Library unavailable for %r; using the seed", title)
-        return search_seed(title)
+    if backend == OPENLIBRARY_BACKEND:
+        try:
+            results = openlibrary.search_book(title)
+        except openlibrary.LookupUnavailable:
+            logger.warning("Open Library unavailable for %r; using the seed", title)
+            return search_seed(title)
+    else:
+        try:
+            results = mcp_client.search_book(title)
+        except mcp_client.MCPUnavailable:
+            logger.warning("MCP lookup unavailable for %r; using the seed", title)
+            return search_seed(title)
 
     return results or search_seed(title)
 
 
 def lookup(title: str) -> BookDetails | None:
-    """Return the best match for a title, or ``None`` if there is none."""
+    """Return the best ISBN-bearing match for a title, or ``None``."""
     candidates = search_book(title)
-    return candidates[0] if candidates else None
+    return next(
+        (candidate for candidate in candidates if normalise_isbn(candidate.isbn)),
+        None,
+    )

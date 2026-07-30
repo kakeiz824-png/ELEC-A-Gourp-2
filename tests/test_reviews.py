@@ -27,14 +27,34 @@ def test_review_text_is_optional(client, book_id) -> None:
     assert response.json()["text"] is None
 
 
-def test_a_book_may_have_many_reviews(client, book_id) -> None:
-    client.post(f"/books/{book_id}/reviews", json={"rating": 4})
-    client.post(f"/books/{book_id}/reviews", json={"rating": 2})
+def test_a_second_review_updates_the_existing_personal_review(client, book_id) -> None:
+    first = client.post(
+        f"/books/{book_id}/reviews", json={"rating": 4, "text": "First note"}
+    )
+    updated = client.post(
+        f"/books/{book_id}/reviews", json={"rating": 2, "text": "Updated note"}
+    )
 
     response = client.get(f"/books/{book_id}/reviews")
 
+    assert first.status_code == 201
+    assert updated.status_code in (200, 201)
+    assert updated.json()["id"] == first.json()["id"]
     assert response.status_code == 200
-    assert len(response.json()) == 2
+    assert response.json() == [updated.json()]
+    assert updated.json()["rating"] == 2
+    assert updated.json()["text"] == "Updated note"
+
+
+def test_repeating_the_same_review_does_not_create_a_duplicate(client, book_id) -> None:
+    payload = {"rating": 5, "text": "Only store this once."}
+
+    first = client.post(f"/books/{book_id}/reviews", json=payload)
+    repeated = client.post(f"/books/{book_id}/reviews", json=payload)
+
+    assert repeated.status_code in (200, 201)
+    assert repeated.json()["id"] == first.json()["id"]
+    assert len(client.get(f"/books/{book_id}/reviews").json()) == 1
 
 
 @pytest.mark.parametrize("rating", [0, 6, -1, 100])

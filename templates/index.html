@@ -47,11 +47,18 @@
             <option value="finished">Finished</option>
             <option value="wishlist">Wishlist</option>
           </select>
-          <button type="submit" id="add-button">Add book</button>
+          <button type="submit" id="add-button">Search books</button>
         </form>
         <p class="hint" id="add-hint" role="status">
-          Only the title is needed. Everything else is looked up.
+          Search by title, then choose the edition you want to add.
         </p>
+        <section class="search-results" id="search-results" hidden>
+          <div class="search-results-heading">
+            <h2>Choose a book</h2>
+            <span id="search-results-count"></span>
+          </div>
+          <ul id="search-results-list"></ul>
+        </section>
       </section>
 
       <section class="stats" id="stats" aria-label="Reading statistics">
@@ -136,6 +143,18 @@
             <button type="submit" class="ghost">Save</button>
           </form>
         </div>
+      </li>
+    </template>
+
+    <template id="search-result-template">
+      <li class="search-result">
+        <img class="search-result-cover" alt="" />
+        <div class="search-result-body">
+          <h3 class="search-result-title"></h3>
+          <p class="search-result-meta"></p>
+          <p class="search-result-isbn"></p>
+        </div>
+        <button type="button" class="choose-book-button">Add to shelf</button>
       </li>
     </template>
   </body>

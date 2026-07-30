@@ -35,6 +35,19 @@ def normalise(title: str) -> str:
     return re.sub(r"\s+", " ", without_punctuation).strip()
 
 
+def normalise_isbn(isbn: str | None) -> str | None:
+    """Return an ISBN suitable for identity comparisons.
+
+    Catalogue providers variously include spaces and hyphens. Those formatting
+    differences do not make two ISBNs different, so keep only digits and a
+    possible ISBN-10 check character.
+    """
+    if isbn is None:
+        return None
+    normalized = re.sub(r"[^0-9Xx]", "", isbn).upper()
+    return normalized or None
+
+
 def cover_url_by_isbn(isbn: str | None) -> str | None:
     """Cover for an ISBN, or ``None`` when there is no ISBN to ask about."""
     return COVER_URL_BY_ISBN.format(isbn=isbn) if isbn else None

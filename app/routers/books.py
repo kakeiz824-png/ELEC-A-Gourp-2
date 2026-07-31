@@ -108,6 +108,23 @@ def search_books(
     return isbn_candidates(title)
 
 
+@router.get("/recent", response_model=list[Book])
+def recent_books(
+    limit: int = Query(default=5, ge=1, le=50, description="How many to return"),
+    connection: sqlite3.Connection = Depends(get_db),
+) -> list[dict]:
+    """List the most recently added books, newest first.
+
+    Declared before ``/{book_id}`` so the literal path ``/books/recent`` is not
+    captured as a book id.
+    """
+    rows = connection.execute(
+        "SELECT * FROM books ORDER BY created_at DESC, id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [row_to_book(row) for row in rows]
+
+
 @router.post("", response_model=Book, status_code=status.HTTP_201_CREATED)
 def create_book(
     payload: BookCreate,

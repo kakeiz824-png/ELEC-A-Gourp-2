@@ -268,12 +268,12 @@ addForm.addEventListener("submit", async (event) => {
     renderSearchResults(candidates, title);
     setHint(
       candidates.length > 0
-        ? "请从下面选择正确的书籍；点击候选书籍前不会加入书架。"
-        : "没有找到带 ISBN 的相关书籍，请尝试其他书名。",
+        ? "Select the correct book below. Nothing is added to a shelf until you pick one."
+        : "No matching books with an ISBN were found. Try a different title.",
       candidates.length > 0 ? undefined : "error",
     );
   } catch (error) {
-    setHint(error.message || "搜索失败，请检查服务后重试。", "error");
+    setHint(error.message || "Search failed. Check the service and try again.", "error");
   } finally {
     addButton.disabled = false;
     titleInput.focus();

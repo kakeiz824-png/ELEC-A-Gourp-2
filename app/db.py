@@ -233,8 +233,9 @@ class _TursoCursor:
         return [_TursoRow(columns, row) for row in self._cursor.fetchall()]
 
     def __iter__(self):
+        # libSQL cursors are not directly iterable, so materialise via fetchall.
         columns = self._columns()
-        for row in self._cursor:
+        for row in self._cursor.fetchall():
             yield _TursoRow(columns, row)
 
 

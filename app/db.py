@@ -11,6 +11,14 @@ from app.details import normalise_isbn
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_DB_PATH = BASE_DIR / "shelf_life.db"
 
+# In production we point at Turso (cloud libSQL) by setting TURSO_DATABASE_URL
+# (a ``libsql://…`` URL) and TURSO_AUTH_TOKEN in the platform dashboard. When the
+# URL is absent we fall back to a local SQLite file, so local dev and the test
+# suite are unaffected.
+TURSO_DATABASE_URL = os.environ.get("TURSO_DATABASE_URL", "").strip()
+TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "").strip()
+USE_TURSO = bool(TURSO_DATABASE_URL)
+
 SHELVES = ("reading", "finished", "wishlist")
 
 SCHEMA = """
@@ -73,6 +81,7 @@ def _migrate_unique_books(connection: sqlite3.Connection) -> None:
         duplicate_ids = [row["id"] for row in duplicates]
         placeholders = ", ".join("?" for _ in duplicate_ids)
 
+        # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- placeholders is only "?, ?, ?"; values bound via parameters. See semgrep-triage.md.
         latest_review = connection.execute(
             f"""
             SELECT *
@@ -83,6 +92,7 @@ def _migrate_unique_books(connection: sqlite3.Connection) -> None:
             """,
             duplicate_ids,
         ).fetchone()
+        # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- placeholders is only "?, ?, ?"; values bound via parameters. See semgrep-triage.md.
         connection.execute(
             f"DELETE FROM reviews WHERE book_id IN ({placeholders})", duplicate_ids
         )
@@ -167,6 +177,100 @@ def _migrate_single_user_reviews(connection: sqlite3.Connection) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Turso / libSQL compatibility layer
+#
+# The ``libsql`` driver returns rows as plain tuples and raises ``ValueError``
+# on constraint violations, whereas the rest of the app expects ``sqlite3``
+# semantics: rows accessible by column name, ``dict(row)``, and
+# ``sqlite3.IntegrityError``. These thin wrappers translate a libSQL connection
+# into that shape so routers and services need no changes.
+# ---------------------------------------------------------------------------
+
+
+class _TursoRow:
+    """A tuple row exposed with sqlite3.Row-style access (name, index, dict)."""
+
+    __slots__ = ("_index", "_values")
+
+    def __init__(self, columns: list[str], values: tuple) -> None:
+        self._index = {name: position for position, name in enumerate(columns)}
+        self._values = values
+
+    def keys(self) -> list[str]:
+        return list(self._index)
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            return self._values[self._index[key]]
+        return self._values[key]
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._index
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+
+class _TursoCursor:
+    """Wrap a libSQL cursor so fetches return :class:`_TursoRow` objects."""
+
+    def __init__(self, cursor) -> None:
+        self._cursor = cursor
+        self.lastrowid = getattr(cursor, "lastrowid", None)
+
+    def _columns(self) -> list[str]:
+        return [column[0] for column in (self._cursor.description or [])]
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        if row is None:
+            return None
+        return _TursoRow(self._columns(), row)
+
+    def fetchall(self) -> list:
+        columns = self._columns()
+        return [_TursoRow(columns, row) for row in self._cursor.fetchall()]
+
+    def __iter__(self):
+        columns = self._columns()
+        for row in self._cursor:
+            yield _TursoRow(columns, row)
+
+
+class _TursoConnection:
+    """Adapt a libSQL connection to the sqlite3 API the app relies on."""
+
+    def __init__(self, connection) -> None:
+        self._connection = connection
+
+    def execute(self, sql: str, parameters=None) -> _TursoCursor:
+        try:
+            if parameters is None:
+                cursor = self._connection.execute(sql)
+            else:
+                cursor = self._connection.execute(sql, parameters)
+        except ValueError as error:
+            # libSQL signals constraint failures as ValueError; re-raise as the
+            # sqlite3 type so existing ``except sqlite3.IntegrityError`` works.
+            if "constraint failed" in str(error).lower():
+                raise sqlite3.IntegrityError(str(error)) from error
+            raise
+        return _TursoCursor(cursor)
+
+    def executescript(self, script: str):
+        return self._connection.executescript(script)
+
+    def commit(self):
+        return self._connection.commit()
+
+    def rollback(self):
+        return self._connection.rollback()
+
+    def close(self):
+        return self._connection.close()
+
+
 def get_db_path() -> Path:
     """Return the active database file.
 
@@ -183,7 +287,27 @@ def get_connection() -> sqlite3.Connection:
     dependency and the endpoint that uses it on different threadpool workers.
     Each request still gets its own connection, so no two threads ever touch
     one connection at the same time.
+
+    In production (``TURSO_DATABASE_URL`` set) this returns a libSQL connection
+    wrapped to speak the same sqlite3 API; otherwise a local SQLite file is used.
     """
+    if USE_TURSO:
+        import libsql
+
+        connection = _TursoConnection(
+            libsql.connect(
+                database=TURSO_DATABASE_URL,
+                auth_token=TURSO_AUTH_TOKEN,
+            )
+        )
+        try:
+            connection.execute("PRAGMA foreign_keys = ON")
+        except Exception:
+            # Not fatal: Turso enforces FK behavior server-side and some builds
+            # reject the PRAGMA over the remote protocol.
+            pass
+        return connection
+
     connection = sqlite3.connect(get_db_path(), check_same_thread=False)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")

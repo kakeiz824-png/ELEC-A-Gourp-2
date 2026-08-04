@@ -1,0 +1,23 @@
+# Render Blueprint — deploy the Shelf Life FastAPI app as a single web service.
+# In the Render dashboard: New → Blueprint → connect this repo. Render reads this
+# file, then prompts for the secret env vars marked `sync: false`.
+services:
+  - type: web
+    name: shelf-life
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # Bind to 0.0.0.0 and the port Render injects via $PORT (never hardcode it).
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # Set to your deployed origin, e.g. https://shelf-life.onrender.com
+      - key: SHELF_LIFE_ORIGINS
+        sync: false
+      # Turso cloud database (libsql://... URL) + auth token. Set in dashboard.
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false

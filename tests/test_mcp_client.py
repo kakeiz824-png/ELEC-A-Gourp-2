@@ -45,10 +45,10 @@ def test_client_maps_tool_failure_to_mcp_unavailable(monkeypatch) -> None:
 
 
 def test_client_rejects_malformed_structured_content(monkeypatch) -> None:
-    async def malformed(title: str):
+    async def malformed(tool: str, arguments: dict[str, str]):
         return {"status": "ok", "books": [{"author": "Nobody"}]}
 
-    monkeypatch.setattr(mcp_client, "_call_search_book", malformed)
+    monkeypatch.setattr(mcp_client, "_call_tool", malformed)
 
     with pytest.raises(mcp_client.MCPUnavailable):
         mcp_client.search_book("The Hobbit")

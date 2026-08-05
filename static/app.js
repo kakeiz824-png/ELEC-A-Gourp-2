@@ -101,6 +101,14 @@ function buildSearchResult(candidate, query) {
   node.querySelector(".search-result-meta").textContent = describeCandidate(candidate);
   node.querySelector(".search-result-isbn").textContent = `ISBN ${candidate.isbn}`;
 
+  // Only author matches are labelled. A title match needs no explanation, but a
+  // book offered because you named its author does.
+  const match = node.querySelector(".search-result-match");
+  match.hidden = candidate.matched !== "author";
+  if (candidate.matched === "author") {
+    match.textContent = "By this author";
+  }
+
   const chooseButton = node.querySelector(".choose-book-button");
   chooseButton.addEventListener("click", async () => {
     chooseButton.disabled = true;
@@ -109,14 +117,15 @@ function buildSearchResult(candidate, query) {
       await api("/books", {
         method: "POST",
         body: JSON.stringify({
-          title: query,
+          title: candidate.title,
+          query,
           isbn: candidate.isbn,
           shelf: shelfSelect.value,
         }),
       });
       titleInput.value = "";
       clearSearchResults();
-      setHint("Book added. Search for another title when you are ready.");
+      setHint("Book added. Search for another title or author when you are ready.");
       await refresh();
     } catch (error) {
       setHint(error.message || "Could not add that book.", "error");
@@ -252,24 +261,22 @@ async function refresh() {
 addForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  const title = titleInput.value.trim();
-  if (!title) {
+  const query = titleInput.value.trim();
+  if (!query) {
     return;
   }
 
   addButton.disabled = true;
   clearSearchResults();
-  setHint(`Searching for "${title}"…`, "working");
+  setHint(`Searching for "${query}"…`, "working");
 
   try {
-    const candidates = await api(
-      `/books/search?title=${encodeURIComponent(title)}`,
-    );
-    renderSearchResults(candidates, title);
+    const candidates = await api(`/books/search?q=${encodeURIComponent(query)}`);
+    renderSearchResults(candidates, query);
     setHint(
       candidates.length > 0
         ? "Select the correct book below. Nothing is added to a shelf until you pick one."
-        : "No matching books with an ISBN were found. Try a different title.",
+        : "No matching books with an ISBN were found. Try a different title or author.",
       candidates.length > 0 ? undefined : "error",
     );
   } catch (error) {

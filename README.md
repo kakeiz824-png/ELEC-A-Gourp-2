@@ -6,11 +6,14 @@ Shelf Life is a personal reading tracker built with FastAPI, SQLite, and vanilla
 - **Finished**
 - **Wishlist**
 
-Users add a book by typing only its title. Shelf Life attempts to retrieve the author, ISBN, publication year, and cover from the public Open Library API. If Open Library is unavailable or returns no match, the application falls back to the offline catalogue in `seed/books.json`. A book can still be saved with `details_pending` when no metadata is available.
+Users add a book by typing one thing: a book title, or the name of an author. Shelf Life attempts to retrieve the author, ISBN, publication year, and cover from the public Open Library API. If Open Library is unavailable or returns no match, the application falls back to the offline catalogue in `seed/books.json`. A book can still be saved with `details_pending` when no metadata is available.
+
+Searching an author's name returns the books that author wrote. This needs its own catalogue index: asking Open Library for `George Orwell` as a *title* returns his biographies and a study guide, never Nineteen Eighty-Four.
 
 ## Current Features
 
 - Add a book using its title and selected shelf.
+- Search by author name and add any of that author's books.
 - Retrieve book metadata from Open Library.
 - Fall back to the offline seed catalogue when live lookup fails.
 - Save unmatched titles for later enrichment.
@@ -29,9 +32,10 @@ Users add a book by typing only its title. Shelf Life attempts to retrieve the a
 
 Shelf Life currently calls the keyless Open Library API directly through `app/openlibrary.py`.
 
-The application provides two Open Library functions:
+The application provides three Open Library functions:
 
 - `search_book(title)` searches for up to five title matches.
+- `search_author(author)` searches the author index for up to five books that author wrote.
 - `get_book_details(isbn)` retrieves details for a selected ISBN.
 
 Open Library responses are converted into the application's internal `BookDetails` format before reaching the API routes or database.
@@ -144,6 +148,7 @@ Stop the server by pressing `Ctrl + C` in PowerShell.
 6. Add a rating and optional review.
 7. Move the book from Reading to Finished.
 8. Refresh the page and confirm that the data persists.
+9. Type `Ursula K. Le Guin` into the same box and search again. Results tagged **By this author** are her own novels; add one of them.
 
 To demonstrate the offline fallback without calling Open Library, set the lookup backend to `seed` before starting the server:
 
@@ -172,6 +177,7 @@ No Open Library account or API key is required.
 | `GET` | `/` | Render the web interface |
 | `GET` | `/health` | Check application status |
 | `GET` | `/books` | List books, optionally filtered by shelf |
+| `GET` | `/books/search` | Return selectable candidates for `?q=`, `?title=`, or `?author=`, storing nothing |
 | `POST` | `/books` | Add a book and attempt metadata lookup |
 | `GET` | `/books/{id}` | Get one book with its reviews |
 | `PATCH` | `/books/{id}/shelf` | Move a book to another shelf |
@@ -186,6 +192,17 @@ Example add request:
 ```json
 {
   "title": "The Hobbit",
+  "shelf": "reading"
+}
+```
+
+When the candidate came from a search, send back the query that found it so the server can re-run the same search and confirm the ISBN:
+
+```json
+{
+  "title": "Nineteen Eighty-Four",
+  "query": "George Orwell",
+  "isbn": "9780451524935",
   "shelf": "reading"
 }
 ```
@@ -235,6 +252,7 @@ Completed:
 Completed:
 
 - Direct Open Library title search
+- Open Library author search, exposed as the `search_by_author` MCP tool
 - ISBN detail lookup
 - Timeout and failure handling
 - Seed fallback

@@ -7,7 +7,8 @@ Jinja2, HTML, CSS, and vanilla JavaScript.
 
 Users can:
 
-- search by title, review up to five ISBN-bearing matches, and select one to add;
+- search by book title or by author name, review up to five ISBN-bearing matches,
+  and select one to add;
 - organize books across `reading`, `finished`, and `wishlist`;
 - view author, ISBN, publication year, and cover information when available;
 - move and delete books;
@@ -17,18 +18,25 @@ Users can:
 ### Current state
 
 The M1 CRUD application is working. The default lookup backend now calls the
-`search_book` MCP tool through `app/mcp_client.py`. The tool uses the keyless Open
-Library client. If MCP, the live service, or the match is unavailable, the application
-falls back to `seed/books.json`. A new book is stored only when lookup supplies an
-ISBN; otherwise `POST /books` returns 404 without creating a row. The browser first
-uses `GET /books/search?title=...`; this search has no database side effects. It then
-passes the selected candidate ISBN to `POST /books`.
+`search_book` and `search_by_author` MCP tools through `app/mcp_client.py`. The tools
+use the keyless Open Library client. If MCP, the live service, or the match is
+unavailable, the application falls back to `seed/books.json`. A new book is stored
+only when lookup supplies an ISBN; otherwise `POST /books` returns 404 without
+creating a row. The browser first uses `GET /books/search?q=...`; this search has no
+database side effects. It then passes the selected candidate ISBN, together with the
+query that found it, to `POST /books`.
 
-The first course-required M2 MCP tool is implemented in `mcp_server/server.py`.
-It exposes `search_book(title)` through FastMCP over STDIO and reuses the existing
-normalized Open Library client. The FastAPI application calls the same tool through
-FastMCP's in-memory transport; `get_book_details(isbn)` remains planned. The direct
-`openlibrary` backend is diagnostic compatibility, not the default path.
+The one search box accepts either a title or an author's name, because the browser
+cannot know which was typed. Both catalogue searches run and `app/services/search.py`
+merges them, so searching "George Orwell" now returns Nineteen Eighty-Four rather
+than only the biographies and study guides whose titles contain his name.
+
+Two of the course-required M2 MCP tools are implemented in `mcp_server/server.py`.
+It exposes `search_book(title)` and `search_by_author(author)` through FastMCP over
+STDIO and reuses the existing normalized Open Library client. The FastAPI application
+calls the same tools through FastMCP's in-memory transport; `get_book_details(isbn)`
+remains planned. The direct `openlibrary` backend is diagnostic compatibility, not the
+default path.
 
 ### Current milestone priorities
 
@@ -59,13 +67,17 @@ Browser interface
 FastAPI routes and Pydantic validation
       |                         |
       v                         v
-SQLite database          lookup(title)
+SQLite database          services/search.py
+                         (merges both searches)
+                              |
+                              v
+                   lookup: search_book / search_author
                               |
                     +---------+----------+
                     |                    |
              MCP client adapter      seed/books.json
                     |
-             search_book tool
+      search_book / search_by_author tools
                     |
             Open Library HTTP
 
@@ -119,7 +131,7 @@ cascade-deletes its Review.
 | `GET` | `/` | Render the three-shelf interface |
 | `GET` | `/health` | Return application health |
 | `GET` | `/books` | List books; optionally filter with `?shelf=` |
-| `GET` | `/books/search` | Return up to five distinct ISBN-bearing candidates without storing them |
+| `GET` | `/books/search` | Return up to five distinct ISBN-bearing candidates without storing them; takes `?q=` (title and author), `?title=`, or `?author=` |
 | `POST` | `/books` | Add the selected ISBN; return 404 without an ISBN or 409 if it already exists |
 | `GET` | `/books/{id}` | Return one book with its reviews |
 | `PATCH` | `/books/{id}/shelf` | Move a book to another shelf |
@@ -149,6 +161,7 @@ app/
   services/
     books.py           Duplicate-safe book creation
     reviews.py         Single-user review upsert
+    search.py          Merges the title and author searches into candidates
     stats.py           Reading statistics
 seed/
   books.json           Offline catalogue and network fallback
@@ -159,6 +172,7 @@ static/
   styles.css           Interface styling
 tests/
   conftest.py
+  test_author_search.py
   test_books.py
   test_lookup.py
   test_mcp_client.py
@@ -220,7 +234,7 @@ MCP clients launch the server as a STDIO subprocess:
 ```
 
 The terminal waits silently for an MCP client; this command does not open a web
-page. The initial server currently exposes only `search_book`.
+page. The server currently exposes `search_book` and `search_by_author`.
 
 ### Optional configuration
 
@@ -242,7 +256,10 @@ Open Library is keyless. Never add or request an API key for the current integra
 - Use parameterized SQL. Never concatenate user input into SQL.
 - Keep raw external API formats inside `openlibrary.py`.
 - Convert external records into `BookDetails` before returning them to the core app.
-- Preserve the stable `lookup(title)` interface when adding the MCP client.
+- Preserve the stable `lookup` interface when adding the MCP client.
+- Search an author's name with Open Library's `author=` index, never its `title=`
+  index, which matches books written *about* the author.
+- Keep candidate merging, ranking, and ISBN de-duplication in `services/search.py`.
 - Validate shelf values as `reading`, `finished`, or `wishlist`.
 - Validate ratings as integers from 1 to 5.
 - Require lookup to supply an ISBN before creating a new book.
@@ -289,10 +306,10 @@ Open Library is keyless. Never add or request an API key for the current integra
 
 ### Add the M2 MCP server
 
-1. Keep the tested `search_book(title)` tool stable and add
-   `get_book_details(isbn)`.
+1. Keep the tested `search_book(title)` and `search_by_author(author)` tools stable
+   and add `get_book_details(isbn)`.
 2. Reuse the existing normalization and failure-handling rules.
-3. Keep the MCP client connected through `lookup(title)`, never directly from a
+3. Keep the MCP client connected through the `lookup` module, never directly from a
    router.
 4. Preserve the offline seed fallback.
 5. Add isolated mocked MCP tests.

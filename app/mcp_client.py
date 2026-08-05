@@ -22,27 +22,23 @@ class MCPUnavailable(RuntimeError):
     """The local MCP call failed or returned an unusable protocol result."""
 
 
-async def _call_search_book(title: str) -> dict[str, Any]:
+async def _call_tool(tool: str, arguments: dict[str, str]) -> dict[str, Any]:
     async with Client(mcp) as client:
-        result = await client.call_tool(
-            "search_book",
-            {"title": title},
-            raise_on_error=False,
-        )
+        result = await client.call_tool(tool, arguments, raise_on_error=False)
 
     structured = result.structured_content
     if not isinstance(structured, dict):
-        raise MCPUnavailable("search_book did not return structured content")
+        raise MCPUnavailable(f"{tool} did not return structured content")
     return structured
 
 
-def _details(payload: object) -> BookDetails:
+def _details(tool: str, payload: object) -> BookDetails:
     if not isinstance(payload, dict):
-        raise MCPUnavailable("search_book returned an invalid book record")
+        raise MCPUnavailable(f"{tool} returned an invalid book record")
 
     title = payload.get("title")
     if not isinstance(title, str) or not title.strip():
-        raise MCPUnavailable("search_book returned a book without a title")
+        raise MCPUnavailable(f"{tool} returned a book without a title")
 
     author = payload.get("author")
     isbn = payload.get("isbn")
@@ -50,13 +46,13 @@ def _details(payload: object) -> BookDetails:
     cover_url = payload.get("cover_url")
 
     if author is not None and not isinstance(author, str):
-        raise MCPUnavailable("search_book returned an invalid author")
+        raise MCPUnavailable(f"{tool} returned an invalid author")
     if isbn is not None and not isinstance(isbn, str):
-        raise MCPUnavailable("search_book returned an invalid ISBN")
+        raise MCPUnavailable(f"{tool} returned an invalid ISBN")
     if year is not None and (isinstance(year, bool) or not isinstance(year, int)):
-        raise MCPUnavailable("search_book returned an invalid year")
+        raise MCPUnavailable(f"{tool} returned an invalid year")
     if cover_url is not None and not isinstance(cover_url, str):
-        raise MCPUnavailable("search_book returned an invalid cover URL")
+        raise MCPUnavailable(f"{tool} returned an invalid cover URL")
 
     return BookDetails(
         title=title.strip(),
@@ -67,22 +63,37 @@ def _details(payload: object) -> BookDetails:
     )
 
 
-def search_book(title: str) -> list[BookDetails]:
-    """Call the local MCP search tool and return normalized catalogue matches."""
+def _books(tool: str, arguments: dict[str, str]) -> list[BookDetails]:
+    """Call one search tool and return its normalized catalogue matches.
+
+    Both search tools answer with the same envelope, so the status handling is
+    shared: ``no_match`` is an empty result, anything other than ``ok`` is a
+    failure the caller should treat as the backend being unavailable.
+    """
     try:
-        response = asyncio.run(_call_search_book(title))
+        response = asyncio.run(_call_tool(tool, arguments))
     except MCPUnavailable:
         raise
     except Exception as exc:
-        raise MCPUnavailable("search_book MCP call failed") from exc
+        raise MCPUnavailable(f"{tool} MCP call failed") from exc
 
     status = response.get("status")
     if status == "no_match":
         return []
     if status != "ok":
-        raise MCPUnavailable(f"search_book MCP status was {status!r}")
+        raise MCPUnavailable(f"{tool} MCP status was {status!r}")
 
     books = response.get("books")
     if not isinstance(books, list):
-        raise MCPUnavailable("search_book returned an invalid books list")
-    return [_details(book) for book in books]
+        raise MCPUnavailable(f"{tool} returned an invalid books list")
+    return [_details(tool, book) for book in books]
+
+
+def search_book(title: str) -> list[BookDetails]:
+    """Call the local MCP title search and return normalized catalogue matches."""
+    return _books("search_book", {"title": title})
+
+
+def search_by_author(author: str) -> list[BookDetails]:
+    """Call the local MCP author search and return normalized catalogue matches."""
+    return _books("search_by_author", {"author": author})

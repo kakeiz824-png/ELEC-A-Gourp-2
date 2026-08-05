@@ -1,10 +1,11 @@
 """Open Library client: the external book database behind ``lookup``.
 
 Open Library is keyless and public, so there is no credential to configure --
-only a timeout, because a slow catalogue must not hold an add open.  Two calls
-are wrapped, matching the two tools M2 specifies:
+only a timeout, because a slow catalogue must not hold an add open.  Three calls
+are wrapped:
 
 * ``search_book(title)`` -- title search, best match first.
+* ``search_author(author)`` -- books written by an author, best match first.
 * ``get_book_details(isbn)`` -- the precise record for one ISBN.
 
 Every network or protocol failure surfaces as ``LookupUnavailable`` so the
@@ -151,6 +152,67 @@ def search_book(title: str) -> list[BookDetails]:
         docs = payload.get("docs")
         if not isinstance(docs, list):
             return []
+
+    results = [_doc_to_details(doc) for doc in docs]
+    return [details for details in results if details is not None]
+
+
+def _author_tokens(author: str) -> list[str]:
+    """The query tokens worth matching on.
+
+    Single letters are dropped because an initial carries no signal: the query
+    "J. R. R. Tolkien" must still match the catalogue's "J.R.R. Tolkien", whose
+    initials fold into one token.
+    """
+    return [token for token in normalise(author).split() if len(token) > 1]
+
+
+def _doc_is_by_author(doc: object, tokens: list[str]) -> bool:
+    """True when the doc's primary author carries every query token.
+
+    An ``author=`` search also returns anthologies and year's-best collections
+    the author only contributed one story to, whose primary author is somebody
+    else entirely.  Testing the primary author keeps the results to books the
+    query is really about, and it keeps the author shown on the card -- also the
+    primary one -- consistent with why the result was included.
+    """
+    if not isinstance(doc, dict):
+        return False
+    primary = _first_string(doc.get("author_name"))
+    if primary is None:
+        return False
+    normalised = normalise(primary)
+    return all(token in normalised for token in tokens)
+
+
+def search_author(author: str) -> list[BookDetails]:
+    """Search Open Library for books written by an author, best match first.
+
+    ``author=`` queries the catalogue's author index, so unlike a title search
+    it returns the author's own works instead of biographies and study guides
+    whose titles happen to contain their name.  Open Library's own relevance
+    order is kept, as in ``search_book``.
+    """
+    query = normalise(author)
+    if not query:
+        return []
+
+    payload = _get_json(
+        SEARCH_URL,
+        {"author": author.strip(), "limit": SEARCH_LIMIT, "fields": SEARCH_FIELDS},
+    )
+    if not isinstance(payload, dict):
+        raise LookupUnavailable("Open Library author search did not return an object")
+
+    docs = payload.get("docs")
+    if not isinstance(docs, list):
+        return []
+
+    tokens = _author_tokens(author)
+    if tokens:
+        # Never let the relevance filter empty a result set: an author credited
+        # only as a co-author would otherwise vanish rather than rank low.
+        docs = [doc for doc in docs if _doc_is_by_author(doc, tokens)] or docs
 
     results = [_doc_to_details(doc) for doc in docs]
     return [details for details in results if details is not None]

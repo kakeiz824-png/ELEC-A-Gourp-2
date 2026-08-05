@@ -269,6 +269,23 @@ button.ghost.danger {
   line-height: 1.4;
 }
 
+/* Says why a book is in the list when its title was not what matched. */
+.search-result-match {
+  display: inline-block;
+  margin: 1px 0 3px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(23, 107, 104, 0.1);
+  color: var(--teal);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.search-result-match[hidden] {
+  display: none;
+}
+
 .choose-book-button {
   grid-column: 2;
   justify-self: start;

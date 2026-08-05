@@ -1,12 +1,5 @@
 const SHELVES = ["reading", "finished", "wishlist"];
-const PLACEHOLDER_COVER =
-  "data:image/svg+xml;charset=utf-8," +
-  encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="58" height="86">' +
-      '<rect width="58" height="86" fill="#ece7dd"/>' +
-      '<text x="29" y="48" text-anchor="middle" font-size="22" fill="#a89f8f">?</text>' +
-      "</svg>",
-  );
+const PLACEHOLDER_COVER = "/static/cover-placeholder.svg";
 
 const hint = document.querySelector("#add-hint");
 const addForm = document.querySelector("#add-form");
@@ -88,14 +81,45 @@ function clearSearchResults() {
   searchResults.hidden = true;
 }
 
+/** Show a real cover when possible and an explicit fallback when it is not. */
+function setCoverImage(cover, book) {
+  const title = book.title || "this book";
+  const coverUrl =
+    typeof book.cover_url === "string" ? book.cover_url.trim() : "";
+
+  const showPlaceholder = () => {
+    cover.src = PLACEHOLDER_COVER;
+    cover.alt = `No cover available for ${title}`;
+    cover.classList.add("cover-placeholder");
+  };
+
+  if (!coverUrl) {
+    showPlaceholder();
+    return;
+  }
+
+  cover.alt = book.author
+    ? `Cover of ${title} by ${book.author}`
+    : `Cover of ${title}`;
+  cover.addEventListener(
+    "load",
+    () => {
+      // Open Library returns a successful 1x1 transparent image when an ISBN
+      // has no cover, so an error handler alone cannot detect every blank.
+      if (cover.naturalWidth <= 1 || cover.naturalHeight <= 1) {
+        showPlaceholder();
+      }
+    },
+    { once: true },
+  );
+  cover.addEventListener("error", showPlaceholder, { once: true });
+  cover.src = coverUrl;
+}
+
 function buildSearchResult(candidate, query) {
   const node = searchResultTemplate.content.firstElementChild.cloneNode(true);
   const cover = node.querySelector(".search-result-cover");
-  cover.src = candidate.cover_url || PLACEHOLDER_COVER;
-  cover.alt = candidate.cover_url ? `Cover of ${candidate.title}` : "";
-  cover.addEventListener("error", () => {
-    cover.src = PLACEHOLDER_COVER;
-  });
+  setCoverImage(cover, candidate);
 
   node.querySelector(".search-result-title").textContent = candidate.title;
   node.querySelector(".search-result-meta").textContent = describeCandidate(candidate);
@@ -153,11 +177,7 @@ function buildCard(book) {
   const node = template.content.firstElementChild.cloneNode(true);
 
   const cover = node.querySelector(".cover");
-  cover.src = book.cover_url || PLACEHOLDER_COVER;
-  cover.alt = book.author ? `Cover of ${book.title} by ${book.author}` : `Cover of ${book.title}`;
-  cover.addEventListener("error", () => {
-    cover.src = PLACEHOLDER_COVER;
-  });
+  setCoverImage(cover, book);
 
   node.querySelector(".book-title").textContent = book.title;
   node.querySelector(".book-meta").textContent = describe(book);

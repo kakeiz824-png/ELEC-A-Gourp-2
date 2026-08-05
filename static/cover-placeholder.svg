@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="116" height="172" viewBox="0 0 116 172" role="img" aria-labelledby="title description">
+  <title id="title">Cover unavailable</title>
+  <desc id="description">A placeholder shown when a book has no cover image.</desc>
+  <rect width="116" height="172" rx="8" fill="#ece7dd"/>
+  <rect x="1" y="1" width="114" height="170" rx="7" fill="none" stroke="#c9c0b2" stroke-width="2"/>
+  <path d="M36 45h36a8 8 0 0 1 8 8v52H44a8 8 0 0 0-8 8V45Z" fill="#fffdf8" stroke="#176b68" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M36 45v68a8 8 0 0 1 8-8h36" fill="none" stroke="#176b68" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="58" y="139" text-anchor="middle" fill="#687188" font-family="Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="1">NO COVER</text>
+</svg>

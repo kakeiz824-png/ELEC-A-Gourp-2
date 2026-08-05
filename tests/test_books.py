@@ -21,6 +21,15 @@ def test_home_page_renders_three_shelves(client) -> None:
     assert "Reading" in response.text
     assert "Finished" in response.text
     assert "Wishlist" in response.text
+    assert "/static/app.js?v=20260805-cover-placeholder" in response.text
+
+
+def test_cover_placeholder_asset_is_served(client) -> None:
+    response = client.get("/static/cover-placeholder.svg")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")
+    assert "NO COVER" in response.text
 
 
 def test_the_demo_input_produces_an_auto_filled_card(client) -> None:

@@ -38,15 +38,17 @@ def call_search_book(title: str) -> str:
     return call_search_result(title).content[0].text
 
 
-def test_server_registers_search_book_with_an_ai_facing_description() -> None:
+def test_server_registers_both_searches_with_ai_facing_descriptions() -> None:
     async def list_tools():
         async with Client(server.mcp) as client:
             return await client.list_tools()
 
     tools = asyncio.run(list_tools())
+    described = {tool.name: tool.description for tool in tools}
 
-    assert [tool.name for tool in tools] == ["search_book"]
-    assert "Use this tool when" in tools[0].description
+    assert sorted(described) == ["search_book", "search_by_author"]
+    for description in described.values():
+        assert "Use this tool when" in description
 
 
 def test_server_starts_over_stdio_like_a_desktop_mcp_client() -> None:
@@ -61,7 +63,7 @@ def test_server_starts_over_stdio_like_a_desktop_mcp_client() -> None:
 
     tools = asyncio.run(list_tools())
 
-    assert [tool.name for tool in tools] == ["search_book"]
+    assert sorted(tool.name for tool in tools) == ["search_book", "search_by_author"]
 
 
 def test_search_book_returns_readable_normalized_results(monkeypatch) -> None:

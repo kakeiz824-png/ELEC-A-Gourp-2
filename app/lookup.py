@@ -1,7 +1,8 @@
-"""Title to book-metadata lookup.
+"""Title and author to book-metadata lookup.
 
-The rest of the application depends only on ``lookup(title)``.  Behind it sit
-three backends:
+The rest of the application searches through ``search_book(title)``,
+``search_author(author)``, and ``lookup(title)``.  Behind them sit three
+backends:
 
 * ``mcp`` (the default) queries Open Library through the local MCP tool.
 * ``openlibrary`` keeps the direct HTTP path available for focused diagnostics.
@@ -9,7 +10,7 @@ three backends:
 
 ``SHELF_LIFE_LOOKUP_BACKEND`` chooses between them.  The seed is not only the
 offline demo: it is also the fallback whenever Open Library is unreachable or
-has nothing for a title, so a network outage degrades the lookup instead of
+has nothing for a query, so a network outage degrades the lookup instead of
 breaking it.
 
 ``lookup`` returns ``None`` when neither backend matches.  The caller stores the
@@ -20,6 +21,7 @@ add.
 import json
 import logging
 import os
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 
@@ -27,7 +29,15 @@ from app import mcp_client, openlibrary
 from app.details import BookDetails, cover_url_by_isbn, normalise, normalise_isbn
 
 
-__all__ = ["BookDetails", "lookup", "normalise", "search_book", "search_seed"]
+__all__ = [
+    "BookDetails",
+    "lookup",
+    "normalise",
+    "search_author",
+    "search_book",
+    "search_seed",
+    "search_seed_author",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -70,15 +80,15 @@ def _seed_catalogue() -> list[BookDetails]:
     ]
 
 
-def search_seed(title: str) -> list[BookDetails]:
-    """Return every seeded candidate for a title, best match first.
+def _ranked(query: str, field: Callable[[BookDetails], str | None]) -> list[BookDetails]:
+    """Seeded books whose chosen field matches the query, best match first.
 
     An exact normalised match wins outright.  Otherwise a candidate matches when
-    the query is a prefix of its title, then when the query appears anywhere in
-    it, so "hobbit" and "sapiens" both find their book.
+    the query is a prefix of the field, then when the query appears anywhere in
+    it, so "hobbit" finds its book and "tolkien" finds everything he wrote.
     """
-    query = normalise(title)
-    if not query:
+    normalised_query = normalise(query)
+    if not normalised_query:
         return []
 
     exact: list[BookDetails] = []
@@ -86,41 +96,88 @@ def search_seed(title: str) -> list[BookDetails]:
     contains: list[BookDetails] = []
 
     for candidate in _seed_catalogue():
-        normalised = normalise(candidate.title)
-        if normalised == query:
+        value = field(candidate)
+        if value is None:
+            continue
+        normalised = normalise(value)
+        if normalised == normalised_query:
             exact.append(candidate)
-        elif normalised.startswith(query):
+        elif normalised.startswith(normalised_query):
             prefix.append(candidate)
-        elif query in normalised:
+        elif normalised_query in normalised:
             contains.append(candidate)
 
     return exact + prefix + contains
 
 
-def search_book(title: str) -> list[BookDetails]:
-    """Search the active backend for a title, best match first.
+def search_seed(title: str) -> list[BookDetails]:
+    """Return every seeded candidate for a title, best match first."""
+    return _ranked(title, lambda candidate: candidate.title)
 
-    On the Open Library backend an outage or an empty result falls through to
-    the seed, so the titles the demo relies on resolve either way.
+
+def search_seed_author(author: str) -> list[BookDetails]:
+    """Return every seeded book written by an author, best match first."""
+    return _ranked(author, lambda candidate: candidate.author)
+
+
+def _search(
+    query: str,
+    *,
+    kind: str,
+    seed: Callable[[str], list[BookDetails]],
+    direct: Callable[[str], list[BookDetails]],
+    tool: Callable[[str], list[BookDetails]],
+) -> list[BookDetails]:
+    """Search the active backend, degrading to the seed, best match first.
+
+    The title and author searches share one fallback policy: on either live
+    backend an outage or an empty result falls through to the seed, so the books
+    the demo relies on resolve either way.
     """
     backend = active_backend()
     if backend == SEED_BACKEND:
-        return search_seed(title)
+        return seed(query)
 
     if backend == OPENLIBRARY_BACKEND:
         try:
-            results = openlibrary.search_book(title)
+            results = direct(query)
         except openlibrary.LookupUnavailable:
-            logger.warning("Open Library unavailable for %r; using the seed", title)
-            return search_seed(title)
+            logger.warning(
+                "Open Library unavailable for %s %r; using the seed", kind, query
+            )
+            return seed(query)
     else:
         try:
-            results = mcp_client.search_book(title)
+            results = tool(query)
         except mcp_client.MCPUnavailable:
-            logger.warning("MCP lookup unavailable for %r; using the seed", title)
-            return search_seed(title)
+            logger.warning(
+                "MCP lookup unavailable for %s %r; using the seed", kind, query
+            )
+            return seed(query)
 
-    return results or search_seed(title)
+    return results or seed(query)
+
+
+def search_book(title: str) -> list[BookDetails]:
+    """Search the active backend for a title, best match first."""
+    return _search(
+        title,
+        kind="title",
+        seed=search_seed,
+        direct=openlibrary.search_book,
+        tool=mcp_client.search_book,
+    )
+
+
+def search_author(author: str) -> list[BookDetails]:
+    """Search the active backend for books by an author, best match first."""
+    return _search(
+        author,
+        kind="author",
+        seed=search_seed_author,
+        direct=openlibrary.search_author,
+        tool=mcp_client.search_by_author,
+    )
 
 
 def lookup(title: str) -> BookDetails | None:

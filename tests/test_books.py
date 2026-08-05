@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 
 import app.routers.books as books_router
+import app.services.search as search_service
 from app.db import get_connection
 from app.details import BookDetails
 
@@ -55,7 +56,7 @@ def test_search_returns_selectable_isbn_candidates_without_storing(
     client, monkeypatch
 ) -> None:
     monkeypatch.setattr(
-        books_router,
+        search_service,
         "search_book",
         lambda title: [
             BookDetails(title="No ISBN"),
@@ -86,7 +87,7 @@ def test_the_user_selected_isbn_is_added_instead_of_the_first_candidate(
     client, monkeypatch
 ) -> None:
     monkeypatch.setattr(
-        books_router,
+        search_service,
         "search_book",
         lambda title: [
             BookDetails(title="First Edition", author="Author One", isbn="1111111111"),

@@ -1,4 +1,4 @@
-"""Book endpoints: add by title, list by shelf, move shelf, delete."""
+"""Book endpoints: search by title or author, add, list by shelf, move, delete."""
 
 import logging
 import sqlite3
@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.db import get_db
 from app.details import normalise_isbn
-from app.lookup import BookDetails, lookup, search_book
+from app.lookup import BookDetails, lookup
 from app.models import (
     Book,
     BookCandidate,
@@ -17,6 +17,7 @@ from app.models import (
     Shelf,
     ShelfUpdate,
 )
+from app.services import search
 from app.services.books import save_book
 
 
@@ -50,36 +51,40 @@ def safe_lookup(title: str) -> BookDetails | None:
         return None
 
 
-def safe_search(title: str) -> list[BookDetails]:
-    """Return catalogue candidates while keeping backend errors out of the UI."""
-    try:
-        return search_book(title)
-    except Exception:
-        logger.warning("Search failed for %r", title, exc_info=True)
-        return []
+def candidate_payload(candidate: search.Candidate) -> dict:
+    """Flatten one candidate into the shape ``BookCandidate`` describes."""
+    return {
+        "title": candidate.details.title,
+        "author": candidate.details.author,
+        "isbn": candidate.details.isbn,
+        "cover_url": candidate.details.cover_url,
+        "year": candidate.details.year,
+        "matched": candidate.matched,
+    }
 
 
-def isbn_candidates(title: str) -> list[BookDetails]:
-    """Return up to five distinct, ISBN-bearing candidates."""
-    candidates: list[BookDetails] = []
-    seen: set[str] = set()
-    for details in safe_search(title):
-        isbn = normalise_isbn(details.isbn)
-        if isbn is None or isbn in seen:
-            continue
-        seen.add(isbn)
-        candidates.append(
-            BookDetails(
-                title=details.title,
-                author=details.author,
-                isbn=isbn,
-                cover_url=details.cover_url,
-                year=details.year,
-            )
-        )
-        if len(candidates) == 5:
-            break
-    return candidates
+def selected_details(payload: BookCreate) -> BookDetails | None:
+    """Re-run the user's search and return the candidate they picked.
+
+    The search is repeated rather than trusting the submitted metadata, so a
+    client cannot invent a title, author, or cover for an ISBN.  It has to be the
+    same search: a book found by author is not necessarily found by its own
+    title, so ``query`` decides which search runs.
+    """
+    selected_isbn = normalise_isbn(payload.isbn)
+    pool = (
+        search.by_query(payload.query)
+        if payload.query
+        else search.by_title(payload.title)
+    )
+    return next(
+        (
+            candidate.details
+            for candidate in pool
+            if normalise_isbn(candidate.details.isbn) == selected_isbn
+        ),
+        None,
+    )
 
 
 @router.get("", response_model=list[Book])
@@ -102,10 +107,37 @@ def list_books(
 
 @router.get("/search", response_model=list[BookCandidate])
 def search_books(
-    title: str = Query(min_length=1, max_length=300),
-) -> list[BookDetails]:
-    """Search for selectable ISBN-bearing candidates without storing anything."""
-    return isbn_candidates(title)
+    q: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=300,
+        description="A title or an author's name; both searches run and merge",
+    ),
+    title: str | None = Query(
+        default=None, min_length=1, max_length=300, description="Search titles only"
+    ),
+    author: str | None = Query(
+        default=None, min_length=1, max_length=300, description="Search authors only"
+    ),
+) -> list[dict]:
+    """Search for selectable ISBN-bearing candidates without storing anything.
+
+    ``q`` is what the browser sends, because its one search box cannot say which
+    kind of thing was typed.  ``title`` and ``author`` stay available for clients
+    that do know, and for asking one catalogue index in isolation.
+    """
+    if q is not None:
+        candidates = search.by_query(q)
+    elif title is not None:
+        candidates = search.by_title(title)
+    elif author is not None:
+        candidates = search.by_author(author)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Provide q, title, or author.",
+        )
+    return [candidate_payload(candidate) for candidate in candidates]
 
 
 @router.get("/recent", response_model=list[Book])
@@ -132,15 +164,7 @@ def create_book(
 ) -> dict:
     """Add the ISBN candidate selected by the user."""
     if payload.isbn:
-        selected_isbn = normalise_isbn(payload.isbn)
-        details = next(
-            (
-                candidate
-                for candidate in isbn_candidates(payload.title)
-                if normalise_isbn(candidate.isbn) == selected_isbn
-            ),
-            None,
-        )
+        details = selected_details(payload)
     else:
         # Backward compatibility for API clients created before the search UI.
         details = safe_lookup(payload.title)

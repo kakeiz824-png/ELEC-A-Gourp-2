@@ -31,14 +31,14 @@
         </p>
 
         <form class="add-form" id="add-form" autocomplete="off">
-          <label class="visually-hidden" for="title-input">Book title</label>
+          <label class="visually-hidden" for="title-input">Book title or author</label>
           <input
             id="title-input"
             name="title"
             type="text"
             maxlength="300"
             required
-            placeholder="e.g. The Hobbit"
+            placeholder="e.g. The Hobbit, or Ursula K. Le Guin"
             aria-describedby="add-hint"
           />
           <label class="visually-hidden" for="shelf-select">Shelf</label>
@@ -50,7 +50,7 @@
           <button type="submit" id="add-button">Search books</button>
         </form>
         <p class="hint" id="add-hint" role="status">
-          Search by title, then choose the edition you want to add.
+          Search by title or by author, then choose the edition you want to add.
         </p>
         <section class="search-results" id="search-results" hidden>
           <div class="search-results-heading">
@@ -153,6 +153,7 @@
           <h3 class="search-result-title"></h3>
           <p class="search-result-meta"></p>
           <p class="search-result-isbn"></p>
+          <p class="search-result-match" hidden></p>
         </div>
         <button type="button" class="choose-book-button">Add to shelf</button>
       </li>

@@ -88,6 +88,21 @@ function setHint(message, state) {
   hint.classList.toggle("error", state === "error");
 }
 
+/** Run one card action, reporting failure and re-syncing either way. */
+async function cardAction(work, failureMessage) {
+  try {
+    await work();
+  } catch (error) {
+    setHint(error.message || failureMessage, "error");
+  } finally {
+    try {
+      await refresh();
+    } catch {
+      // A failed refresh must not mask the action's own error handling.
+    }
+  }
+}
+
 async function updateApiStatus() {
   const status = document.querySelector("#api-status");
 
@@ -209,24 +224,33 @@ function buildCard(book) {
 
   const moveSelect = node.querySelector(".move-select");
   moveSelect.value = book.shelf;
-  moveSelect.addEventListener("change", async () => {
-    await api(`/books/${book.id}/shelf`, {
-      method: "PATCH",
-      body: JSON.stringify({ shelf: moveSelect.value }),
-    });
-    await refresh();
+  moveSelect.addEventListener("change", () => {
+    cardAction(
+      () =>
+        api(`/books/${book.id}/shelf`, {
+          method: "PATCH",
+          body: JSON.stringify({ shelf: moveSelect.value }),
+        }),
+      "Could not move that book.",
+    );
   });
 
-  retryButton.addEventListener("click", async () => {
+  retryButton.addEventListener("click", () => {
     setHint(`Looking up "${book.title}"…`, "working");
-    await api(`/books/${book.id}/enrich`, { method: "POST" });
-    setHint("Only the title is needed. Everything else is looked up.");
-    await refresh();
+    cardAction(
+      async () => {
+        await api(`/books/${book.id}/enrich`, { method: "POST" });
+        setHint("Only the title is needed. Everything else is looked up.");
+      },
+      `Could not look up "${book.title}".`,
+    );
   });
 
-  node.querySelector(".delete-button").addEventListener("click", async () => {
-    await api(`/books/${book.id}`, { method: "DELETE" });
-    await refresh();
+  node.querySelector(".delete-button").addEventListener("click", () => {
+    cardAction(
+      () => api(`/books/${book.id}`, { method: "DELETE" }),
+      "Could not delete that book.",
+    );
   });
 
   const reviewForm = node.querySelector(".review-form");
@@ -245,17 +269,20 @@ function buildCard(book) {
     }
   });
 
-  reviewForm.addEventListener("submit", async (event) => {
+  reviewForm.addEventListener("submit", (event) => {
     event.preventDefault();
     const text = reviewForm.querySelector(".review-text").value.trim();
-    await api(`/books/${book.id}/reviews`, {
-      method: "POST",
-      body: JSON.stringify({
-        rating: Number(reviewForm.querySelector(".rating-select").value),
-        text: text || null,
-      }),
-    });
-    await refresh();
+    cardAction(
+      () =>
+        api(`/books/${book.id}/reviews`, {
+          method: "POST",
+          body: JSON.stringify({
+            rating: Number(reviewForm.querySelector(".rating-select").value),
+            text: text || null,
+          }),
+        }),
+      "Could not save your review.",
+    );
   });
 
   return node;

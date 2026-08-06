@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import app.routers.books as books_router
 import app.services.search as search_service
@@ -30,6 +31,16 @@ def test_cover_placeholder_asset_is_served(client) -> None:
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/svg+xml")
     assert "NO COVER" in response.text
+
+
+def test_cover_fallback_detects_blank_images() -> None:
+    """The browser script keeps the 1x1 transparent-image detection."""
+    source = (Path(__file__).resolve().parent.parent / "static" / "app.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "/static/cover-placeholder.svg" in source
+    assert "naturalWidth" in source
 
 
 def test_the_demo_input_produces_an_auto_filled_card(client) -> None:

@@ -25,6 +25,7 @@ import os
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
+from time import monotonic
 
 from app import mcp_client, openlibrary
 from app.details import (
@@ -59,6 +60,35 @@ OPENLIBRARY_BACKEND = "openlibrary"
 DEFAULT_BACKEND = MCP_BACKEND
 
 DEFAULT_LIMIT = 5
+
+CACHE_TTL_SECONDS = 300.0
+_MAX_CACHE_ENTRIES = 256
+_lookup_cache: dict[tuple, tuple[float, object]] = {}
+
+
+def clear_lookup_cache() -> None:
+    """Drop every cached live-lookup answer (test isolation, diagnostics)."""
+    _lookup_cache.clear()
+
+
+def _cached_lookup(key: tuple, compute: Callable[[], object]) -> object:
+    """Return a cached live-catalogue answer, computing and storing on a miss.
+
+    The key includes the active backend, so tests and demos that switch
+    backends never read a result fetched by another backend.  A small TTL stops
+    stale metadata lingering, and the cache is bounded so a long session cannot
+    grow without limit.
+    """
+    now = monotonic()
+    cached = _lookup_cache.get(key)
+    if cached is not None and now - cached[0] < CACHE_TTL_SECONDS:
+        return cached[1]
+
+    value = compute()
+    if len(_lookup_cache) >= _MAX_CACHE_ENTRIES:
+        _lookup_cache.clear()
+    _lookup_cache[key] = (now, value)
+    return value
 
 
 def active_backend() -> str:
@@ -165,26 +195,33 @@ def _search(
     if backend == SEED_BACKEND:
         return seed(query, limit=limit, offset=offset)
 
-    if backend == OPENLIBRARY_BACKEND:
-        try:
-            page = direct(query, limit=limit, offset=offset)
-        except openlibrary.LookupUnavailable:
-            logger.warning(
-                "Open Library unavailable for %s %r; using the seed", kind, query
-            )
-            return seed(query, limit=limit, offset=offset)
-    else:
-        try:
-            page = tool(query, limit=limit, offset=offset)
-        except mcp_client.MCPUnavailable:
-            logger.warning(
-                "MCP lookup unavailable for %s %r; using the seed", kind, query
-            )
-            return seed(query, limit=limit, offset=offset)
+    cache_key = (backend, kind, normalise(query), limit, offset)
 
-    if page.total == 0:
-        return seed(query, limit=limit, offset=offset)
-    return page
+    def fetch() -> SearchPage:
+        if backend == OPENLIBRARY_BACKEND:
+            try:
+                page = direct(query, limit=limit, offset=offset)
+            except openlibrary.LookupUnavailable:
+                logger.warning(
+                    "Open Library unavailable for %s %r; using the seed", kind, query
+                )
+                return seed(query, limit=limit, offset=offset)
+        else:
+            try:
+                page = tool(query, limit=limit, offset=offset)
+            except mcp_client.MCPUnavailable:
+                logger.warning(
+                    "MCP lookup unavailable for %s %r; using the seed", kind, query
+                )
+                return seed(query, limit=limit, offset=offset)
+
+        if page.total == 0:
+            return seed(query, limit=limit, offset=offset)
+        return page
+
+    result = _cached_lookup(cache_key, fetch)
+    assert isinstance(result, SearchPage)
+    return result
 
 
 def search_book(
@@ -243,20 +280,28 @@ def details_for_isbn(isbn: str) -> BookDetails | None:
     if backend == SEED_BACKEND:
         return _seed_isbn(isbn)
 
-    if backend == OPENLIBRARY_BACKEND:
-        try:
-            details = openlibrary.get_book_details(isbn)
-        except openlibrary.LookupUnavailable:
-            logger.warning("Open Library unavailable for ISBN %r; using the seed", isbn)
-            return _seed_isbn(isbn)
-    else:
-        try:
-            details = mcp_client.get_book_details(isbn)
-        except mcp_client.MCPUnavailable:
-            logger.warning("MCP lookup unavailable for ISBN %r; using the seed", isbn)
-            return _seed_isbn(isbn)
+    cache_key = (backend, "isbn", normalise_isbn(isbn) or isbn.strip().lower())
 
-    return details or _seed_isbn(isbn)
+    def fetch() -> BookDetails | None:
+        if backend == OPENLIBRARY_BACKEND:
+            try:
+                details = openlibrary.get_book_details(isbn)
+            except openlibrary.LookupUnavailable:
+                logger.warning(
+                    "Open Library unavailable for ISBN %r; using the seed", isbn
+                )
+                return _seed_isbn(isbn)
+        else:
+            try:
+                details = mcp_client.get_book_details(isbn)
+            except mcp_client.MCPUnavailable:
+                logger.warning("MCP lookup unavailable for ISBN %r; using the seed", isbn)
+                return _seed_isbn(isbn)
+        return details or _seed_isbn(isbn)
+
+    value = _cached_lookup(cache_key, fetch)
+    assert value is None or isinstance(value, BookDetails)
+    return value
 
 
 def lookup(title: str) -> BookDetails | None:

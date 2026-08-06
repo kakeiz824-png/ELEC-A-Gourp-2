@@ -33,6 +33,18 @@ def test_cover_placeholder_asset_is_served(client) -> None:
     assert "NO COVER" in response.text
 
 
+def test_card_actions_report_failures() -> None:
+    """Card actions go through cardAction so a failed request is never silent."""
+    source = (Path(__file__).resolve().parent.parent / "static" / "app.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "async function cardAction" in source
+    assert "Could not move that book." in source
+    assert "Could not delete that book." in source
+    assert "Could not save your review." in source
+
+
 def test_cover_fallback_detects_blank_images() -> None:
     """The browser script keeps the 1x1 transparent-image detection."""
     source = (Path(__file__).resolve().parent.parent / "static" / "app.js").read_text(

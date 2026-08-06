@@ -6,9 +6,7 @@ Shelf Life is a personal reading tracker built with FastAPI, SQLite, and vanilla
 - **Finished**
 - **Wishlist**
 
-Users add a book by typing one thing: a book title, or the name of an author. Shelf Life attempts to retrieve the author, ISBN, publication year, and cover from the public Open Library API. If Open Library is unavailable or returns no match, the application falls back to the offline catalogue in `seed/books.json`. A book can still be saved with `details_pending` when no metadata is available.
-
-Searching an author's name returns the books that author wrote. This needs its own catalogue index: asking Open Library for `George Orwell` as a *title* returns his biographies and a study guide, never Nineteen Eighty-Four.
+Users add a book by typing only its title. By default, Shelf Life searches the public Open Library catalogue through the project's MCP `search_book` and `search_by_author` tools and lets the user choose an edition. If the MCP/Open Library lookup is unavailable, the application falls back to the offline catalogue in `seed/books.json`. A book can still be saved with `details_pending` when no metadata is available.
 
 ## Current Features
 
@@ -23,24 +21,33 @@ Searching an author's name returns the books that author wrote. This needs its o
 - Delete books and automatically delete their reviews.
 - Add a rating from 1 to 5.
 - Add optional review text.
-- Display book covers with a placeholder fallback.
+- Display book covers with an explicit `NO COVER` fallback when a cover is missing, broken, or returned as a transparent 1x1 image.
 - View total books, shelf counts, review count, and average rating.
 - Store data persistently in SQLite.
 - Use a browser interface or FastAPI's interactive API documentation.
 
 ## Current Integration Status
 
-Shelf Life currently calls the keyless Open Library API directly through `app/openlibrary.py`.
+The course-required MCP integration is complete:
 
-The application provides three Open Library functions:
+- `mcp_server/server.py` registers the `search_book` and `search_by_author` MCP tools with FastMCP.
+- The tool searches Open Library and returns up to five normalized matches with readable text and structured book data.
+- `app/mcp_client.py` calls the MCP tool and converts its structured response into the application's internal `BookDetails` model.
+- The web application's default lookup backend is `mcp`.
+- MCP or Open Library failures fall back to the offline catalogue when possible.
+- The MCP server can also run over STDIO for MCP Inspector or another desktop MCP client.
 
-- `search_book(title)` searches for up to five title matches.
-- `search_author(author)` searches the author index for up to five books that author wrote.
-- `get_book_details(isbn)` retrieves details for a selected ISBN.
+`app/openlibrary.py` remains the keyless Open Library adapter used by the MCP tool. Direct Open Library and offline seed backends are retained for diagnostics and demonstrations.
 
-Open Library responses are converted into the application's internal `BookDetails` format before reaching the API routes or database.
+## Running the MCP Server
 
-The course-required MCP server has **not yet been completed**. A future M2 task is to expose these Open Library functions as MCP tools while preserving the current lookup and fallback behavior.
+From the repository root, start the STDIO MCP server with:
+
+```powershell
+.venv\Scripts\python.exe -m mcp_server.server
+```
+
+For MCP Inspector, configure the command as `.venv\Scripts\python.exe`, the arguments as `-m mcp_server.server`, and the working directory as this repository root. The registered tools are `search_book` and `search_by_author`.
 
 ## Technology Stack
 
@@ -62,6 +69,7 @@ app/
   details.py            Normalized BookDetails data type
   lookup.py             Chooses live or seed lookup and handles fallback
   main.py               FastAPI application entry point
+  mcp_client.py         Application-side FastMCP client adapter
   models.py             Request and response validation models
   openlibrary.py        Open Library HTTP client
   routers/
@@ -70,13 +78,20 @@ app/
     reviews.py          Review and rating endpoints
   services/
     __init__.py
+    books.py            Book persistence and duplicate protection
+    reviews.py          Review persistence
     stats.py            Reading statistics
+
+mcp_server/
+  __init__.py
+  server.py             FastMCP search_book and search_by_author tools and STDIO entry point
 
 seed/
   books.json            Offline catalogue and network fallback
 
 static/
   app.js                Browser behavior and API requests
+  cover-placeholder.svg Explicit missing-cover fallback
   styles.css            Interface styling
 
 templates/
@@ -84,15 +99,25 @@ templates/
 
 tests/
   conftest.py
+  test_author_search.py
   test_books.py
   test_lookup.py
+  test_mcp_client.py
+  test_mcp_server.py
+  test_migrations.py
   test_openlibrary.py
+  test_recent.py
   test_reviews.py
+  test_turso_adapter.py
 
 CLAUDE.md                AI development instructions
 DESIGN.md                Requirements and technical design
 GIT_GUIDE.md             Beginner Git and GitHub guide
 M1-REFLECTION.md         M1 team reflection
+AI-USAGE-LOG.md          Project-wide record of meaningful AI-assisted work
+SEMGREP-REPORT.md         Human-readable security scan and triage summary
+semgrep-report.json       Raw Semgrep machine-readable scan result
+.github/workflows/test.yml  GitHub Actions test workflow
 README.md                Setup and usage documentation
 requirements.txt         Python dependencies
 ```
@@ -148,7 +173,6 @@ Stop the server by pressing `Ctrl + C` in PowerShell.
 6. Add a rating and optional review.
 7. Move the book from Reading to Finished.
 8. Refresh the page and confirm that the data persists.
-9. Type `Ursula K. Le Guin` into the same box and search again. Results tagged **By this author** are her own novels; add one of them.
 
 To demonstrate the offline fallback without calling Open Library, set the lookup backend to `seed` before starting the server:
 
@@ -165,7 +189,7 @@ All configuration variables are optional.
 |---|---|---|
 | `SHELF_LIFE_DB` | `shelf_life.db` in the repository root | SQLite database location |
 | `SHELF_LIFE_ORIGINS` | `http://127.0.0.1:8000,http://localhost:8000` | Comma-separated CORS allowlist |
-| `SHELF_LIFE_LOOKUP_BACKEND` | `openlibrary` | Use `openlibrary` for live lookup or `seed` for offline lookup |
+| `SHELF_LIFE_LOOKUP_BACKEND` | `mcp` | Use `mcp` by default, `openlibrary` for direct diagnostics, or `seed` for offline lookup |
 | `SHELF_LIFE_OPENLIBRARY_TIMEOUT` | `5` | Seconds to wait for Open Library before falling back |
 
 No Open Library account or API key is required.
@@ -177,7 +201,8 @@ No Open Library account or API key is required.
 | `GET` | `/` | Render the web interface |
 | `GET` | `/health` | Check application status |
 | `GET` | `/books` | List books, optionally filtered by shelf |
-| `GET` | `/books/search` | Return selectable candidates for `?q=`, `?title=`, or `?author=`, storing nothing |
+| `GET` | `/books/search` | Search for selectable book editions without storing them |
+| `GET` | `/books/recent` | Return the most recently added books |
 | `POST` | `/books` | Add a book and attempt metadata lookup |
 | `GET` | `/books/{id}` | Get one book with its reviews |
 | `PATCH` | `/books/{id}/shelf` | Move a book to another shelf |
@@ -192,17 +217,6 @@ Example add request:
 ```json
 {
   "title": "The Hobbit",
-  "shelf": "reading"
-}
-```
-
-When the candidate came from a search, send back the query that found it so the server can re-run the same search and confirm the ISBN:
-
-```json
-{
-  "title": "Nineteen Eighty-Four",
-  "query": "George Orwell",
-  "isbn": "9780451524935",
   "shelf": "reading"
 }
 ```
@@ -229,8 +243,18 @@ The automated tests cover:
 - Live Open Library response conversion
 - Network failures and invalid responses
 - Fallback from Open Library to the seed catalogue
+- MCP tool registration, STDIO startup, structured responses, and error handling
+- Application-side MCP response validation and web API integration
+- Explicit missing-cover fallback asset
 
 Tests must not access the real Open Library service. Network behavior is tested using mocked responses.
+
+## Continuous Integration
+
+GitHub Actions runs the full test suite on every push to `main`, every pull request
+targeting `main`, and manual workflow dispatch. The workflow uses Python 3.11, installs
+the pinned dependencies from `requirements.txt`, and runs the same pytest command shown
+above. See [`.github/workflows/test.yml`](.github/workflows/test.yml).
 
 ## Milestone Status
 
@@ -251,19 +275,31 @@ Completed:
 
 Completed:
 
+- FastMCP server with the `search_book` and `search_by_author` tools
+- Structured MCP results plus readable tool output
+- Application-side MCP client and default MCP lookup path
+- STDIO startup for MCP Inspector and desktop clients
+- MCP server, client, and web integration tests
 - Direct Open Library title search
-- Open Library author search, exposed as the `search_by_author` MCP tool
 - ISBN detail lookup
 - Timeout and failure handling
 - Seed fallback
 - Mocked Open Library tests
+- Semgrep automatic community-rule scan: 493 rules, 54 files, 0 findings
 
 Remaining:
 
-- Implement the required MCP server
-- Expose Open Library functions as MCP tools
-- Run and review the required security scan
 - Select a realistically sized optional M2 extension
+
+### M3: Ship It
+
+Current deployment: [https://shelf-life-3thw.onrender.com/](https://shelf-life-3thw.onrender.com/)
+
+Remaining before final code freeze:
+
+- Deploy the latest reviewed fixes, including the explicit missing-cover fallback.
+- Re-run the critical user workflow on the production URL and save verification evidence.
+- Complete the cross-team review record, AI usage log, and retrospective/reflection.
 
 ## Future Roadmap
 
@@ -286,3 +322,5 @@ These are roadmap candidates rather than a commitment to deliver every feature i
 - Read [`DESIGN.md`](DESIGN.md) for requirements and technical decisions.
 - Read [`GIT_GUIDE.md`](GIT_GUIDE.md) for the team Git workflow.
 - Read [`M1-REFLECTION.md`](M1-REFLECTION.md) for the M1 reflection.
+- Read [`AI-USAGE-LOG.md`](AI-USAGE-LOG.md) for the project-wide AI assistance record.
+- Read [`SEMGREP-REPORT.md`](SEMGREP-REPORT.md) for the security scan and human triage summary.

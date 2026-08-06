@@ -34,16 +34,17 @@ than only the biographies and study guides whose titles contain his name.
 Two of the course-required M2 MCP tools are implemented in `mcp_server/server.py`.
 It exposes `search_book(title)` and `search_by_author(author)` through FastMCP over
 STDIO and reuses the existing normalized Open Library client. The FastAPI application
-calls the same tools through FastMCP's in-memory transport; `get_book_details(isbn)`
-remains planned. The direct `openlibrary` backend is diagnostic compatibility, not the
-default path.
+calls the same tools through FastMCP's in-memory transport. `get_book_details(isbn)`
+exists in `app/openlibrary.py` but is not yet exposed as an MCP tool. The direct
+`openlibrary` backend is diagnostic compatibility, not the default path.
 
 ### Current milestone priorities
 
 1. Keep the M1 application stable and tested.
 2. Complete the M2 Open Library MCP tools and connect them through the existing
    lookup boundary.
-3. Extend the mocked MCP tests and run the required security scan.
+3. Keep the security scan and CI evidence current (`SEMGREP-REPORT.md` and
+   `.github/workflows/test.yml`).
 4. Add optional features only after the required M2 work is complete.
 
 ### Out of scope for the current milestone

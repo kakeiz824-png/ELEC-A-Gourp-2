@@ -7,8 +7,8 @@ Jinja2, HTML, CSS, and vanilla JavaScript.
 
 Users can:
 
-- search by book title or by author name, review up to five ISBN-bearing matches,
-  and select one to add;
+- search by book title or by author name, page through the ISBN-bearing matches, and
+  select one to add;
 - organize books across `reading`, `finished`, and `wishlist`;
 - view author, ISBN, publication year, and cover information when available;
 - move and delete books;
@@ -17,34 +17,42 @@ Users can:
 
 ### Current state
 
-The M1 CRUD application is working. The default lookup backend now calls the
-`search_book` and `search_by_author` MCP tools through `app/mcp_client.py`. The tools
-use the keyless Open Library client. If MCP, the live service, or the match is
-unavailable, the application falls back to `seed/books.json`. A new book is stored
-only when lookup supplies an ISBN; otherwise `POST /books` returns 404 without
-creating a row. The browser first uses `GET /books/search?q=...`; this search has no
-database side effects. It then passes the selected candidate ISBN, together with the
-query that found it, to `POST /books`.
+The M1 CRUD application is working. The default lookup backend calls the
+`search_book`, `search_by_author`, and `get_book_details` MCP tools through
+`app/mcp_client.py`. The tools use the keyless Open Library client. If MCP, the live
+service, or the match is unavailable, the application falls back to `seed/books.json`.
+A new book is stored only when the catalogue supplies an ISBN; otherwise `POST /books`
+returns 404 without creating a row. The browser first uses
+`GET /books/search?title=...` or `?author=...`; this search has no database side
+effects. It then passes the selected candidate ISBN to `POST /books`.
 
-The one search box accepts either a title or an author's name, because the browser
-cannot know which was typed. Both catalogue searches run and `app/services/search.py`
-merges them, so searching "George Orwell" now returns Nineteen Eighty-Four rather
-than only the biographies and study guides whose titles contain his name.
+The search box is paired with a Title/Author selector, so the server is told which
+catalogue index to query and never infers it. Inferring it was tried and removed: no
+rule tells "Harry Potter" the series from Harry Potter the legal historian, or "Dune"
+the novel from Linda Dune, because in each pair both readings are real. See DESIGN.md
+section 7.6.
 
-Two of the course-required M2 MCP tools are implemented in `mcp_server/server.py`.
-It exposes `search_book(title)` and `search_by_author(author)` through FastMCP over
-STDIO and reuses the existing normalized Open Library client. The FastAPI application
-calls the same tools through FastMCP's in-memory transport. `get_book_details(isbn)`
-exists in `app/openlibrary.py` but is not yet exposed as an MCP tool. The direct
-`openlibrary` backend is diagnostic compatibility, not the default path.
+Two indexes are needed because Open Library's title index answers an author's name
+with books written about them: a title search for "George Orwell" returns his
+biographies and a SparkNotes guide, never Nineteen Eighty-Four.
+
+Results are paged, ten to a page, rather than capped at five, so a search for Harry
+Potter can show all seven novels. `POST /books` confirms the submitted ISBN by
+resolving it through `get_book_details` rather than by re-running the search, because
+the chosen candidate may have come from page seven and catalogue relevance order
+shifts between requests.
+
+All three course-required M2 MCP catalogue tools are implemented in
+`mcp_server/server.py` and reuse the existing normalized Open Library client. The
+FastAPI application calls the same tools through FastMCP's in-memory transport. The
+direct `openlibrary` backend is diagnostic compatibility, not the default path.
 
 ### Current milestone priorities
 
 1. Keep the M1 application stable and tested.
 2. Complete the M2 Open Library MCP tools and connect them through the existing
    lookup boundary.
-3. Keep the security scan and CI evidence current (`SEMGREP-REPORT.md` and
-   `.github/workflows/test.yml`).
+3. Extend the mocked MCP tests and run the required security scan.
 4. Add optional features only after the required M2 work is complete.
 
 ### Out of scope for the current milestone
@@ -69,16 +77,16 @@ FastAPI routes and Pydantic validation
       |                         |
       v                         v
 SQLite database          services/search.py
-                         (merges both searches)
+                         (one paged search)
                               |
                               v
                    lookup: search_book / search_author
-                              |
+                              |     details_for_isbn
                     +---------+----------+
                     |                    |
              MCP client adapter      seed/books.json
                     |
-      search_book / search_by_author tools
+   search_book / search_by_author / get_book_details
                     |
             Open Library HTTP
 
@@ -132,7 +140,7 @@ cascade-deletes its Review.
 | `GET` | `/` | Render the three-shelf interface |
 | `GET` | `/health` | Return application health |
 | `GET` | `/books` | List books; optionally filter with `?shelf=` |
-| `GET` | `/books/search` | Return up to five distinct ISBN-bearing candidates without storing them; takes `?q=` (title and author), `?title=`, or `?author=` |
+| `GET` | `/books/search` | Return one page of distinct ISBN-bearing candidates without storing them; takes exactly one of `?title=` or `?author=`, plus `?page=` and `?per_page=` |
 | `POST` | `/books` | Add the selected ISBN; return 404 without an ISBN or 409 if it already exists |
 | `GET` | `/books/{id}` | Return one book with its reviews |
 | `PATCH` | `/books/{id}/shelf` | Move a book to another shelf |
@@ -162,7 +170,7 @@ app/
   services/
     books.py           Duplicate-safe book creation
     reviews.py         Single-user review upsert
-    search.py          Merges the title and author searches into candidates
+    search.py          Pages one catalogue search into selectable candidates
     stats.py           Reading statistics
 seed/
   books.json           Offline catalogue and network fallback
@@ -180,6 +188,7 @@ tests/
   test_mcp_server.py
   test_openlibrary.py
   test_reviews.py
+  test_search_paging.py
 mcp_server/
   __init__.py
   server.py
@@ -235,7 +244,7 @@ MCP clients launch the server as a STDIO subprocess:
 ```
 
 The terminal waits silently for an MCP client; this command does not open a web
-page. The server currently exposes `search_book` and `search_by_author`.
+page. The server exposes `search_book`, `search_by_author`, and `get_book_details`.
 
 ### Optional configuration
 
@@ -260,7 +269,10 @@ Open Library is keyless. Never add or request an API key for the current integra
 - Preserve the stable `lookup` interface when adding the MCP client.
 - Search an author's name with Open Library's `author=` index, never its `title=`
   index, which matches books written *about* the author.
-- Keep candidate merging, ranking, and ISBN de-duplication in `services/search.py`.
+- Require the caller to say which index to search. Do not infer it from the query; see
+  DESIGN.md section 7.6 for the two ways that failed.
+- Keep paging, ISBN de-duplication, and candidate assembly in `services/search.py`.
+- Confirm a submitted ISBN with `details_for_isbn`, never by re-running a search.
 - Validate shelf values as `reading`, `finished`, or `wishlist`.
 - Validate ratings as integers from 1 to 5.
 - Require lookup to supply an ISBN before creating a new book.
@@ -307,8 +319,8 @@ Open Library is keyless. Never add or request an API key for the current integra
 
 ### Add the M2 MCP server
 
-1. Keep the tested `search_book(title)` and `search_by_author(author)` tools stable
-   and add `get_book_details(isbn)`.
+1. Keep the tested `search_book`, `search_by_author`, and `get_book_details` tools
+   stable.
 2. Reuse the existing normalization and failure-handling rules.
 3. Keep the MCP client connected through the `lookup` module, never directly from a
    router.

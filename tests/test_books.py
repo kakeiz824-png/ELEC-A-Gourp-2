@@ -1,9 +1,10 @@
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import app.routers.books as books_router
 import app.services.search as search_service
 from app.db import get_connection
-from app.details import BookDetails
+from app.details import BookDetails, SearchPage
 
 
 def test_health_returns_application_status(client) -> None:
@@ -30,6 +31,16 @@ def test_cover_placeholder_asset_is_served(client) -> None:
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/svg+xml")
     assert "NO COVER" in response.text
+
+
+def test_cover_fallback_detects_blank_images() -> None:
+    """The browser script keeps the 1x1 transparent-image detection."""
+    source = (Path(__file__).resolve().parent.parent / "static" / "app.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "/static/cover-placeholder.svg" in source
+    assert "naturalWidth" in source
 
 
 def test_the_demo_input_produces_an_auto_filled_card(client) -> None:
@@ -67,52 +78,43 @@ def test_search_returns_selectable_isbn_candidates_without_storing(
     monkeypatch.setattr(
         search_service,
         "search_book",
-        lambda title: [
-            BookDetails(title="No ISBN"),
-            BookDetails(title="Edition 1", isbn="1111111111"),
-            BookDetails(title="Duplicate ISBN", isbn="111-111-111-1"),
-            BookDetails(title="Edition 2", isbn="2222222222"),
-            BookDetails(title="Edition 3", isbn="3333333333"),
-            BookDetails(title="Edition 4", isbn="4444444444"),
-            BookDetails(title="Edition 5", isbn="5555555555"),
-            BookDetails(title="Edition 6", isbn="6666666666"),
-        ],
+        lambda title, **paging: SearchPage(
+            total=8,
+            results=[
+                BookDetails(title="No ISBN"),
+                BookDetails(title="Edition 1", isbn="1111111111"),
+                BookDetails(title="Duplicate ISBN", isbn="111-111-111-1"),
+                BookDetails(title="Edition 2", isbn="2222222222"),
+                BookDetails(title="Edition 3", isbn="3333333333"),
+            ],
+        ),
     )
 
     response = client.get("/books/search", params={"title": "A title"})
 
     assert response.status_code == 200
-    assert [book["isbn"] for book in response.json()] == [
+    # No ISBN is unstorable, and the hyphenated duplicate is the same book.
+    assert [book["isbn"] for book in response.json()["items"]] == [
         "1111111111",
         "2222222222",
         "3333333333",
-        "4444444444",
-        "5555555555",
     ]
     assert client.get("/books").json() == []
 
 
 def test_the_user_selected_isbn_is_added_instead_of_the_first_candidate(
-    client, monkeypatch
+    client,
 ) -> None:
-    monkeypatch.setattr(
-        search_service,
-        "search_book",
-        lambda title: [
-            BookDetails(title="First Edition", author="Author One", isbn="1111111111"),
-            BookDetails(title="Chosen Edition", author="Author Two", isbn="2222222222"),
-        ],
-    )
-
+    """Two seeded books share nothing but a shelf; the submitted ISBN decides."""
     response = client.post(
         "/books",
-        json={"title": "Shared Title", "isbn": "222-222-222-2", "shelf": "wishlist"},
+        json={"title": "Dune", "isbn": "978-0-451-52493-5", "shelf": "wishlist"},
     )
 
     assert response.status_code == 201
-    assert response.json()["title"] == "Chosen Edition"
-    assert response.json()["author"] == "Author Two"
-    assert response.json()["isbn"] == "2222222222"
+    assert response.json()["title"] == "Nineteen Eighty-Four"
+    assert response.json()["author"] == "George Orwell"
+    assert response.json()["isbn"] == "9780451524935"
     assert response.json()["shelf"] == "wishlist"
 
 

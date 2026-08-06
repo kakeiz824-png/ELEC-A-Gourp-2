@@ -45,7 +45,7 @@ def json_route(payload, status_code: int = 200):
 def test_search_book_maps_a_real_search_response(mock_openlibrary) -> None:
     mock_openlibrary(json_route(SEARCH_DOC))
 
-    results = openlibrary.search_book("The Hobbit")
+    results = openlibrary.search_book("The Hobbit").results
 
     assert len(results) == 2
     first = results[0]
@@ -61,7 +61,7 @@ def test_search_falls_back_to_an_isbn_cover_when_there_is_no_cover_id(
 ) -> None:
     mock_openlibrary(json_route(SEARCH_DOC))
 
-    results = openlibrary.search_book("The Hobbit")
+    results = openlibrary.search_book("The Hobbit").results
 
     assert results[1].cover_url == "https://covers.openlibrary.org/b/isbn/9780345368584-M.jpg"
 
@@ -107,7 +107,7 @@ def test_search_uses_a_broad_query_when_the_title_field_has_no_match(
 
     mock_openlibrary(handler)
 
-    results = openlibrary.search_book("神秘的魔法石")
+    results = openlibrary.search_book("神秘的魔法石").results
 
     assert len(requests) == 2
     assert requests[0]["title"] == "神秘的魔法石"
@@ -123,13 +123,13 @@ def test_search_returns_nothing_for_a_blank_title_without_a_request(
 
     mock_openlibrary(handler)
 
-    assert openlibrary.search_book("   ") == []
+    assert openlibrary.search_book("   ").results == []
 
 
 def test_search_drops_a_doc_with_no_title(mock_openlibrary) -> None:
     mock_openlibrary(json_route({"docs": [{"author_name": ["Nobody"]}, {"title": "Dune"}]}))
 
-    results = openlibrary.search_book("dune")
+    results = openlibrary.search_book("dune").results
 
     assert [details.title for details in results] == ["Dune"]
 
@@ -137,7 +137,7 @@ def test_search_drops_a_doc_with_no_title(mock_openlibrary) -> None:
 def test_search_tolerates_a_doc_with_no_author_year_or_isbn(mock_openlibrary) -> None:
     mock_openlibrary(json_route({"docs": [{"title": "An Untouched Record"}]}))
 
-    details = openlibrary.search_book("an untouched record")[0]
+    details = openlibrary.search_book("an untouched record").results[0]
 
     assert details.author is None
     assert details.year is None

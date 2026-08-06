@@ -7,10 +7,58 @@ const addButton = document.querySelector("#add-button");
 const titleInput = document.querySelector("#title-input");
 const shelfSelect = document.querySelector("#shelf-select");
 const template = document.querySelector("#book-template");
+const searchMode = document.querySelector("#search-mode");
 const searchResults = document.querySelector("#search-results");
 const searchResultsCount = document.querySelector("#search-results-count");
 const searchResultsList = document.querySelector("#search-results-list");
 const searchResultTemplate = document.querySelector("#search-result-template");
+const pagination = document.querySelector("#pagination");
+const prevPageButton = document.querySelector("#prev-page");
+const nextPageButton = document.querySelector("#next-page");
+const pageStatus = document.querySelector("#page-status");
+
+const PLACEHOLDERS = {
+  title: "e.g. The Hobbit",
+  author: "e.g. Ursula K. Le Guin",
+};
+
+/** Show a real cover when possible and an explicit fallback when it is not. */
+function setCoverImage(cover, book) {
+  const title = book.title || "this book";
+  const coverUrl =
+    typeof book.cover_url === "string" ? book.cover_url.trim() : "";
+
+  const showPlaceholder = () => {
+    cover.src = PLACEHOLDER_COVER;
+    cover.alt = `No cover available for ${title}`;
+    cover.classList.add("cover-placeholder");
+  };
+
+  if (!coverUrl) {
+    showPlaceholder();
+    return;
+  }
+
+  cover.alt = book.author
+    ? `Cover of ${title} by ${book.author}`
+    : `Cover of ${title}`;
+  cover.addEventListener(
+    "load",
+    () => {
+      // Open Library returns a successful 1x1 transparent image when an ISBN
+      // has no cover, so an error handler alone cannot detect every blank.
+      if (cover.naturalWidth <= 1 || cover.naturalHeight <= 1) {
+        showPlaceholder();
+      }
+    },
+    { once: true },
+  );
+  cover.addEventListener("error", showPlaceholder, { once: true });
+  cover.src = coverUrl;
+}
+
+/** What is currently on screen, so the page buttons can re-ask for it. */
+let currentSearch = null;
 
 /** Fetch JSON and raise on any non-2xx so callers only handle one failure path. */
 async function api(path, options = {}) {
@@ -79,44 +127,11 @@ function describeCandidate(book) {
 function clearSearchResults() {
   searchResultsList.replaceChildren();
   searchResults.hidden = true;
+  pagination.hidden = true;
+  currentSearch = null;
 }
 
-/** Show a real cover when possible and an explicit fallback when it is not. */
-function setCoverImage(cover, book) {
-  const title = book.title || "this book";
-  const coverUrl =
-    typeof book.cover_url === "string" ? book.cover_url.trim() : "";
-
-  const showPlaceholder = () => {
-    cover.src = PLACEHOLDER_COVER;
-    cover.alt = `No cover available for ${title}`;
-    cover.classList.add("cover-placeholder");
-  };
-
-  if (!coverUrl) {
-    showPlaceholder();
-    return;
-  }
-
-  cover.alt = book.author
-    ? `Cover of ${title} by ${book.author}`
-    : `Cover of ${title}`;
-  cover.addEventListener(
-    "load",
-    () => {
-      // Open Library returns a successful 1x1 transparent image when an ISBN
-      // has no cover, so an error handler alone cannot detect every blank.
-      if (cover.naturalWidth <= 1 || cover.naturalHeight <= 1) {
-        showPlaceholder();
-      }
-    },
-    { once: true },
-  );
-  cover.addEventListener("error", showPlaceholder, { once: true });
-  cover.src = coverUrl;
-}
-
-function buildSearchResult(candidate, query) {
+function buildSearchResult(candidate) {
   const node = searchResultTemplate.content.firstElementChild.cloneNode(true);
   const cover = node.querySelector(".search-result-cover");
   setCoverImage(cover, candidate);
@@ -124,14 +139,6 @@ function buildSearchResult(candidate, query) {
   node.querySelector(".search-result-title").textContent = candidate.title;
   node.querySelector(".search-result-meta").textContent = describeCandidate(candidate);
   node.querySelector(".search-result-isbn").textContent = `ISBN ${candidate.isbn}`;
-
-  // Only author matches are labelled. A title match needs no explanation, but a
-  // book offered because you named its author does.
-  const match = node.querySelector(".search-result-match");
-  match.hidden = candidate.matched !== "author";
-  if (candidate.matched === "author") {
-    match.textContent = "By this author";
-  }
 
   const chooseButton = node.querySelector(".choose-book-button");
   chooseButton.addEventListener("click", async () => {
@@ -142,7 +149,6 @@ function buildSearchResult(candidate, query) {
         method: "POST",
         body: JSON.stringify({
           title: candidate.title,
-          query,
           isbn: candidate.isbn,
           shelf: shelfSelect.value,
         }),
@@ -162,14 +168,19 @@ function buildSearchResult(candidate, query) {
   return node;
 }
 
-function renderSearchResults(candidates, query) {
+function renderSearchResults(results) {
   searchResultsList.replaceChildren(
-    ...candidates.map((candidate) => buildSearchResult(candidate, query)),
+    ...results.items.map((candidate) => buildSearchResult(candidate)),
   );
-  searchResultsCount.textContent = `${candidates.length} result${
-    candidates.length === 1 ? "" : "s"
+  searchResultsCount.textContent = `${results.total} result${
+    results.total === 1 ? "" : "s"
   }`;
-  searchResults.hidden = candidates.length === 0;
+  searchResults.hidden = results.items.length === 0;
+
+  pageStatus.textContent = `Page ${results.page} of ${results.pages}`;
+  prevPageButton.disabled = results.page <= 1;
+  nextPageButton.disabled = results.page >= results.pages;
+  pagination.hidden = results.items.length === 0 || results.pages <= 1;
 }
 
 /** Build one book card. All user-supplied text goes in via textContent. */
@@ -278,6 +289,41 @@ async function refresh() {
   renderStats(stats);
 }
 
+/** True while a search is in flight, so a double click cannot fetch twice. */
+let searching = false;
+
+async function runSearch(mode, query, page) {
+  if (searching) {
+    return;
+  }
+  searching = true;
+  addButton.disabled = true;
+  setHint(page > 1 ? `Loading page ${page}…` : `Searching for "${query}"…`, "working");
+
+  try {
+    const results = await api(
+      `/books/search?${mode}=${encodeURIComponent(query)}&page=${page}`,
+    );
+    // Trust the page the server reports, not the one that was asked for.
+    currentSearch = { mode, query, page: results.page };
+    renderSearchResults(results);
+    setHint(
+      results.items.length > 0
+        ? "Select the correct book below. Nothing is added to a shelf until you pick one."
+        : `No books with an ISBN were found. Try a different ${mode}.`,
+      results.items.length > 0 ? undefined : "error",
+    );
+    if (results.page === 1) {
+      titleInput.focus();
+    }
+  } catch (error) {
+    setHint(error.message || "Search failed. Check the service and try again.", "error");
+  } finally {
+    searching = false;
+    addButton.disabled = false;
+  }
+}
+
 addForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -286,25 +332,29 @@ addForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  addButton.disabled = true;
+  const mode = searchMode.value;
   clearSearchResults();
-  setHint(`Searching for "${query}"…`, "working");
+  await runSearch(mode, query, 1);
+});
 
-  try {
-    const candidates = await api(`/books/search?q=${encodeURIComponent(query)}`);
-    renderSearchResults(candidates, query);
-    setHint(
-      candidates.length > 0
-        ? "Select the correct book below. Nothing is added to a shelf until you pick one."
-        : "No matching books with an ISBN were found. Try a different title or author.",
-      candidates.length > 0 ? undefined : "error",
-    );
-  } catch (error) {
-    setHint(error.message || "Search failed. Check the service and try again.", "error");
-  } finally {
-    addButton.disabled = false;
-    titleInput.focus();
+prevPageButton.addEventListener("click", () => {
+  if (currentSearch) {
+    runSearch(currentSearch.mode, currentSearch.query, currentSearch.page - 1);
   }
+});
+
+nextPageButton.addEventListener("click", () => {
+  if (currentSearch) {
+    runSearch(currentSearch.mode, currentSearch.query, currentSearch.page + 1);
+  }
+});
+
+searchMode.addEventListener("change", () => {
+  // The two indexes answer different questions, so old results would mislead.
+  titleInput.placeholder = PLACEHOLDERS[searchMode.value];
+  clearSearchResults();
+  setHint(`Searching by ${searchMode.value}.`);
+  titleInput.focus();
 });
 
 updateApiStatus();

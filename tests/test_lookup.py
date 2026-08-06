@@ -1,5 +1,5 @@
 import app.lookup as lookup_module
-from app.details import BookDetails, normalise_isbn
+from app.details import BookDetails, SearchPage, normalise_isbn
 from app.lookup import lookup, normalise, search_book
 
 
@@ -25,10 +25,10 @@ def test_lookup_chooses_the_first_candidate_that_has_an_isbn(monkeypatch) -> Non
     monkeypatch.setattr(
         lookup_module,
         "search_book",
-        lambda title: [
+        lambda title, **paging: SearchPage(total=2, results=[
             BookDetails(title="No ISBN", author="Author One"),
             BookDetails(title="With ISBN", author="Author Two", isbn="9780000000002"),
-        ],
+        ]),
     )
 
     details = lookup_module.lookup("A title")
@@ -65,7 +65,7 @@ def test_lookup_returns_none_for_a_blank_title() -> None:
 
 
 def test_search_book_ranks_the_exact_match_first() -> None:
-    results = search_book("The Lord of the Rings")
+    results = search_book("The Lord of the Rings").results
 
     assert results
     assert results[0].title == "The Lord of the Rings"
@@ -73,3 +73,31 @@ def test_search_book_ranks_the_exact_match_first() -> None:
 
 def test_normalise_folds_case_punctuation_and_spacing() -> None:
     assert normalise("  The   Hobbit!  ") == "the hobbit"
+
+def test_live_lookup_is_cached_for_a_repeat_query(monkeypatch) -> None:
+    """Repeating the same live query hits the catalogue once, not every call."""
+    calls = {"count": 0}
+
+    def fake_search_book(title: str, *, limit: int, offset: int) -> SearchPage:
+        calls["count"] += 1
+        return SearchPage(
+            results=[
+                BookDetails(
+                    title="The Hobbit",
+                    author="J. R. R. Tolkien",
+                    isbn="9780261103344",
+                    year=1937,
+                    cover_url=None,
+                )
+            ],
+            total=1,
+        )
+
+    monkeypatch.setenv("SHELF_LIFE_LOOKUP_BACKEND", "openlibrary")
+    monkeypatch.setattr(lookup_module.openlibrary, "search_book", fake_search_book)
+
+    first = lookup_module.search_book("The Hobbit")
+    second = lookup_module.search_book("The Hobbit")
+
+    assert calls["count"] == 1
+    assert first.results == second.results

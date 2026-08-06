@@ -7,13 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.db import get_db
 from app.details import normalise_isbn
-from app.lookup import BookDetails, lookup
+from app.lookup import BookDetails, details_for_isbn, lookup
 from app.models import (
     Book,
-    BookCandidate,
     BookCreate,
     BookWithReviews,
     Review,
+    SearchResults,
     Shelf,
     ShelfUpdate,
 )
@@ -51,40 +51,31 @@ def safe_lookup(title: str) -> BookDetails | None:
         return None
 
 
-def candidate_payload(candidate: search.Candidate) -> dict:
+def candidate_payload(details: BookDetails) -> dict:
     """Flatten one candidate into the shape ``BookCandidate`` describes."""
     return {
-        "title": candidate.details.title,
-        "author": candidate.details.author,
-        "isbn": candidate.details.isbn,
-        "cover_url": candidate.details.cover_url,
-        "year": candidate.details.year,
-        "matched": candidate.matched,
+        "title": details.title,
+        "author": details.author,
+        "isbn": details.isbn,
+        "cover_url": details.cover_url,
+        "year": details.year,
     }
 
 
-def selected_details(payload: BookCreate) -> BookDetails | None:
-    """Re-run the user's search and return the candidate they picked.
+def confirm_isbn(isbn: str) -> BookDetails | None:
+    """Ask the catalogue about one ISBN, treating a failure as no such book.
 
-    The search is repeated rather than trusting the submitted metadata, so a
-    client cannot invent a title, author, or cover for an ISBN.  It has to be the
-    same search: a book found by author is not necessarily found by its own
-    title, so ``query`` decides which search runs.
+    The catalogue is asked rather than the submitted metadata being trusted, so
+    a client cannot invent a title, author, or cover for an ISBN. Confirming by
+    ISBN rather than by re-running the search also survives paging: the chosen
+    candidate may have come from page seven, and catalogue relevance order can
+    shift between two requests.
     """
-    selected_isbn = normalise_isbn(payload.isbn)
-    pool = (
-        search.by_query(payload.query)
-        if payload.query
-        else search.by_title(payload.title)
-    )
-    return next(
-        (
-            candidate.details
-            for candidate in pool
-            if normalise_isbn(candidate.details.isbn) == selected_isbn
-        ),
-        None,
-    )
+    try:
+        return details_for_isbn(isbn)
+    except Exception:
+        logger.warning("ISBN lookup failed for %r", isbn, exc_info=True)
+        return None
 
 
 @router.get("", response_model=list[Book])
@@ -105,39 +96,47 @@ def list_books(
     return [row_to_book(row) for row in rows]
 
 
-@router.get("/search", response_model=list[BookCandidate])
+@router.get("/search", response_model=SearchResults)
 def search_books(
-    q: str | None = Query(
-        default=None,
-        min_length=1,
-        max_length=300,
-        description="A title or an author's name; both searches run and merge",
-    ),
     title: str | None = Query(
-        default=None, min_length=1, max_length=300, description="Search titles only"
+        default=None, min_length=1, max_length=300, description="Search book titles"
     ),
     author: str | None = Query(
-        default=None, min_length=1, max_length=300, description="Search authors only"
+        default=None, min_length=1, max_length=300, description="Search book authors"
     ),
-) -> list[dict]:
-    """Search for selectable ISBN-bearing candidates without storing anything.
+    page: int = Query(default=1, ge=1, description="1-based page number"),
+    per_page: int = Query(
+        default=search.DEFAULT_PER_PAGE,
+        ge=1,
+        le=search.MAX_PER_PAGE,
+        description="Candidates per page",
+    ),
+) -> dict:
+    """Return one page of selectable candidates without storing anything.
 
-    ``q`` is what the browser sends, because its one search box cannot say which
-    kind of thing was typed.  ``title`` and ``author`` stay available for clients
-    that do know, and for asking one catalogue index in isolation.
+    Exactly one of ``title`` and ``author`` is required. The browser sends
+    whichever its Title/Author selector is set to, so the server never has to
+    guess whether a string like "Dune" or "Harry Potter" names a book or a person
+    -- for both of those, either reading is a real book by a real author.
     """
-    if q is not None:
-        candidates = search.by_query(q)
-    elif title is not None:
-        candidates = search.by_title(title)
-    elif author is not None:
-        candidates = search.by_author(author)
-    else:
+    if (title is None) == (author is None):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Provide q, title, or author.",
+            detail="Provide exactly one of title or author.",
         )
-    return [candidate_payload(candidate) for candidate in candidates]
+
+    found = (
+        search.by_title(title, page=page, per_page=per_page)
+        if title is not None
+        else search.by_author(author, page=page, per_page=per_page)
+    )
+    return {
+        "items": [candidate_payload(details) for details in found.candidates],
+        "page": found.page,
+        "per_page": found.per_page,
+        "pages": found.pages,
+        "total": found.total,
+    }
 
 
 @router.get("/recent", response_model=list[Book])
@@ -164,7 +163,7 @@ def create_book(
 ) -> dict:
     """Add the ISBN candidate selected by the user."""
     if payload.isbn:
-        details = selected_details(payload)
+        details = confirm_isbn(payload.isbn)
     else:
         # Backward compatibility for API clients created before the search UI.
         details = safe_lookup(payload.title)

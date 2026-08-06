@@ -1,8 +1,9 @@
 """Application-side adapter for Shelf Life MCP tools.
 
-The browser application consumes normalized ``BookDetails`` values, while MCP
-clients receive protocol results containing both readable text and structured
-data. This module is the only place that translates between those two shapes.
+The browser application consumes normalized ``BookDetails`` and ``SearchPage``
+values, while MCP clients receive protocol results containing both readable text
+and structured data. This module is the only place that translates between those
+two shapes.
 
 The local web application uses FastMCP's in-memory transport. It still exercises
 the MCP tool registration, validation, serialization, and client protocol, but
@@ -14,15 +15,18 @@ from typing import Any
 
 from fastmcp import Client
 
-from app.details import BookDetails
+from app.details import BookDetails, SearchPage
 from mcp_server.server import mcp
+
+
+DEFAULT_LIMIT = 5
 
 
 class MCPUnavailable(RuntimeError):
     """The local MCP call failed or returned an unusable protocol result."""
 
 
-async def _call_tool(tool: str, arguments: dict[str, str]) -> dict[str, Any]:
+async def _call_tool(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     async with Client(mcp) as client:
         result = await client.call_tool(tool, arguments, raise_on_error=False)
 
@@ -63,37 +67,73 @@ def _details(tool: str, payload: object) -> BookDetails:
     )
 
 
-def _books(tool: str, arguments: dict[str, str]) -> list[BookDetails]:
-    """Call one search tool and return its normalized catalogue matches.
-
-    Both search tools answer with the same envelope, so the status handling is
-    shared: ``no_match`` is an empty result, anything other than ``ok`` is a
-    failure the caller should treat as the backend being unavailable.
-    """
+def _respond(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Call one tool, turning any transport failure into ``MCPUnavailable``."""
     try:
-        response = asyncio.run(_call_tool(tool, arguments))
+        return asyncio.run(_call_tool(tool, arguments))
     except MCPUnavailable:
         raise
     except Exception as exc:
         raise MCPUnavailable(f"{tool} MCP call failed") from exc
 
+
+def _total(response: dict[str, Any], fallback: int) -> int:
+    reported = response.get("total")
+    if isinstance(reported, bool) or not isinstance(reported, int) or reported < 0:
+        return fallback
+    return reported
+
+
+def _page(tool: str, arguments: dict[str, Any]) -> SearchPage:
+    """Call one search tool and return its normalized page of matches.
+
+    Both searches answer with the same envelope, so the status handling is
+    shared: ``no_match`` is an empty page, anything other than ``ok`` is a
+    failure the caller should treat as the backend being unavailable.
+    """
+    response = _respond(tool, arguments)
+
     status = response.get("status")
     if status == "no_match":
-        return []
+        return SearchPage(results=[], total=_total(response, 0))
     if status != "ok":
         raise MCPUnavailable(f"{tool} MCP status was {status!r}")
 
     books = response.get("books")
     if not isinstance(books, list):
         raise MCPUnavailable(f"{tool} returned an invalid books list")
-    return [_details(tool, book) for book in books]
+
+    results = [_details(tool, book) for book in books]
+    return SearchPage(results=results, total=_total(response, len(results)))
 
 
-def search_book(title: str) -> list[BookDetails]:
-    """Call the local MCP title search and return normalized catalogue matches."""
-    return _books("search_book", {"title": title})
+def search_book(
+    title: str, *, limit: int = DEFAULT_LIMIT, offset: int = 0
+) -> SearchPage:
+    """Call the local MCP title search and return one normalized page."""
+    return _page(
+        "search_book", {"title": title, "limit": limit, "offset": offset}
+    )
 
 
-def search_by_author(author: str) -> list[BookDetails]:
-    """Call the local MCP author search and return normalized catalogue matches."""
-    return _books("search_by_author", {"author": author})
+def search_author(
+    author: str, *, limit: int = DEFAULT_LIMIT, offset: int = 0
+) -> SearchPage:
+    """Call the local MCP author search and return one normalized page."""
+    return _page(
+        "search_by_author", {"author": author, "limit": limit, "offset": offset}
+    )
+
+
+def get_book_details(isbn: str) -> BookDetails | None:
+    """Call the local MCP ISBN lookup, or return ``None`` if there is no such book."""
+    tool = "get_book_details"
+    response = _respond(tool, {"isbn": isbn})
+
+    status = response.get("status")
+    if status == "no_match":
+        return None
+    if status != "ok":
+        raise MCPUnavailable(f"{tool} MCP status was {status!r}")
+
+    return _details(tool, response.get("book"))

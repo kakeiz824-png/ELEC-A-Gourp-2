@@ -6,19 +6,20 @@ Shelf Life is a personal reading tracker. Readers organize books across three sh
 `reading`, `finished`, and `wishlist`. They can add ratings and optional review text,
 view reading statistics, and move books as their reading status changes.
 
-The main interaction is intentionally simple: the user types one thing, reviews up to
-five ISBN-bearing catalogue matches, and selects the correct edition. Nothing is
+The main interaction is intentionally simple: the user types one thing, reviews the
+ISBN-bearing catalogue matches a page at a time, and selects the correct edition. Nothing is
 stored until the user makes that selection; the application then fills in the author,
 ISBN, cover URL, and publication year.
 
-That one thing may be a book title or an author's name, and the single search box
-cannot tell which. So both catalogue searches run and their results are merged. This
-matters because Open Library's title index answers an author's name with books
-written *about* them: searching "George Orwell" by title returns his biographies and
-a SparkNotes guide, never Nineteen Eighty-Four.
+That one thing may be a book title or an author's name, and a Title/Author selector
+beside the box says which. Two indexes are needed because Open Library's title index
+answers an author's name with books written *about* them: searching "George Orwell" by
+title returns his biographies and a SparkNotes guide, never Nineteen Eighty-Four.
+Results are paged rather than capped, so a search for Harry Potter can show all seven
+novels.
 
-The current application calls the `search_book` and `search_by_author` MCP tools
-through `app/mcp_client.py`. The MCP server reuses the keyless Open Library client and
+The current application calls the `search_book`, `search_by_author`, and
+`get_book_details` MCP tools through `app/mcp_client.py`. The MCP server reuses the keyless Open Library client and
 the application falls back to `seed/books.json` when MCP, the live catalogue, or the
 match is unavailable. A direct `openlibrary` backend remains available for focused
 diagnostics.
@@ -31,8 +32,9 @@ diagnostics.
 - **Magic moment:** the user types `The Hobbit`, presses **Search books**, selects the
   correct result, and a complete card appears with Tolkien, 1937, an ISBN, and a cover.
 - **Exact demo input:** title = `The Hobbit`, shelf = `reading`.
-- **Second demo input:** author = `Ursula K. Le Guin`, in the same box. Results labelled
-  **By this author** are her own books, not books written about her.
+- **Second demo input:** switch the selector to Author and enter `Ursula K. Le Guin`.
+  The results are her own novels, not the books written about her that a title search
+  returns.
 - **Expected output:** the search itself changes no shelf; selecting one candidate
   creates one populated card on the Reading shelf.
 - **Additional demo actions:** add a rating and review, move the book to Finished,
@@ -86,14 +88,14 @@ for M2.
     appear on two reading-status shelves.
 14. As the single user, I want a later review submission to update my existing
     review instead of creating another personal review.
-15. As a reader, I want to see up to five matching editions before adding a book so
-    that I can choose the correct title and ISBN.
+15. As a reader, I want to page through the matching editions before adding a book so
+    that I can choose the correct title and ISBN, however many matches there are.
 
 ### M1 acceptance criteria
 
 | Story | Done when |
 |---|---|
-| Search before adding | A valid title returns at most five distinct ISBN-bearing candidates and creates no stored row. |
+| Search before adding | A valid query returns one page of distinct ISBN-bearing candidates, with the total and page count, and creates no stored row. |
 | Add a selected book | Selecting a candidate and shelf creates exactly that ISBN; a blank or overlong title is rejected. |
 | Choose a shelf | `reading`, `finished`, and `wishlist` are accepted; any other value is rejected. |
 | Move a book | The selected book appears on the new shelf; a missing book returns 404. |
@@ -135,9 +137,9 @@ milestone scope should be agreed by the team and recorded in this document.
    search tool, fall back to `seed/books.json`, and require an ISBN before creation.
 3. [x] **Ratings, reviews, persistence, and validation:** store data in SQLite, validate
    user input, and cascade-delete reviews with their book.
-4. [ ] **Required M2 MCP integration:** `search_book(title)` and
-   `search_by_author(author)` are exposed and connected through the existing lookup
-   boundary; `get_book_details(isbn)` remains to be exposed.
+4. [x] **Required M2 MCP integration:** `search_book(title)`,
+   `search_by_author(author)`, and `get_book_details(isbn)` are exposed and connected
+   through the existing lookup boundary.
 5. [ ] **Required M2 verification:** mock the MCP tools in automated tests, run the
    full test suite, and run and review the required security scan.
 
@@ -220,30 +222,45 @@ Early recommendations can use the same author or Open Library subjects. The prod
 must not label these as "people who liked this also liked" until real user-interaction
 data exists.
 
-### 7.6 One search box, two catalogue searches, merged by earned relevance
+### 7.6 The user says whether they typed a title or an author
 
-The search box takes one string and the browser cannot know whether it holds a title
-or an author's name, so asking the user to declare which was rejected as friction on
-the one interaction the product is built around. Both searches run instead, and
-`app/services/search.py` merges them.
+The search box is paired with a Title/Author selector. The server is told which index
+to query and never infers it.
 
-Concatenating the two result lists does not work, because the list is capped at five
-and an author's name is always a weak title match too: the five title slots fill with
-biographies and study guides and the author's own books are never seen. So the lists
-are interleaved, a title match taking the first slot and an author match the second.
+Inferring it was built first, and removed. One box was tried on the grounds that
+making the user classify their own input is friction on the interaction the product is
+built around. Both searches ran and the results were merged, with a guaranteed slot in
+the merged list earned by naming an author in full. Two failures killed it, and both
+are the same failure:
 
-Interleaving unconditionally does not work either. Many people share a surname with a
-famous book, so `author=Dune` returns 131 real authors named Dune and a search for
-Dune offered a TEAS practice-test book. An author result therefore earns its
-guaranteed slot only when the query names that author in full — the same name once
-spacing is ignored, or every identifying token of their name present in the query.
-A result matching only part of a name is appended instead, so it appears only if the
-title results left room. The cost is that a bare surname such as "Orwell" no longer
-guarantees his books a slot; the benefit is that "Dune" and "Sapiens" return the books
-they obviously mean.
+- `author=Dune` returns 131 real authors named Dune, so searching Dune offered a TEAS
+  practice-test book by Linda Dune. The full-name rule was added to fix this.
+- `author=Harry Potter` returns a real legal historian named Harry Potter, and the
+  query *is* his full name, so the rule granted him slots 2 and 4 and pushed two of
+  the novels out of a five-item list.
 
-Two searches cost two catalogue calls per query. That is accepted as the price of not
-asking the user to classify their own input.
+No rule separates those cases from a genuine author search, because in each pair both
+readings are true: Harry Potter is a series and a person, Dune is a novel and a
+surname. The ambiguity is in the input, so it is resolved where the knowledge is, by
+the person typing. One click buys correctness that no heuristic can, and it halves
+catalogue traffic because only one index is queried.
+
+### 7.7 Results are paged, and an addition is confirmed by ISBN
+
+Capping candidates at five hid books: a search for Harry Potter could not show seven
+novels. Results are paged instead, ten to a page, with the page count taken from the
+catalogue's own total.
+
+Paging broke how an addition was confirmed. `POST /books` re-ran the search and looked
+for the submitted ISBN among the results, which is sound when there is one page of
+five and wrong once there are 311: the chosen book may have come from page seven, and
+Open Library's relevance order shifts between requests, so a legitimate add could 404.
+
+An ISBN identifies a book, so the ISBN is now resolved directly through
+`get_book_details`. That has no such failure mode, needs no search state in the
+request, and keeps the property the re-search existed for: metadata comes from the
+catalogue, never from the client. It also required exposing the third planned M2 tool,
+which is why `get_book_details` is now implemented rather than pending.
 
 ## 8. System Architecture
 
@@ -254,7 +271,7 @@ asking the user to classify their own input.
 [FastAPI routes and validation]
        |                 |
        v                 v
-[SQLite database]   [services/search.py: merge title + author]
+[SQLite database]   [services/search.py: one paged search]
                           |
                           v
                     [lookup boundary]
@@ -264,7 +281,7 @@ asking the user to classify their own input.
           [MCP client adapter]       [seed/books.json fallback]
                   |
                   v
-   [FastMCP search_book / search_by_author tools]
+   [FastMCP search_book / search_by_author / get_book_details]
                   |
                   v
         [Open Library HTTP client]
@@ -312,7 +329,7 @@ submission updates the existing Review. A Review belongs to exactly one Book.
 | `GET` | `/` | Render the three-shelf interface |
 | `GET` | `/health` | Return application health |
 | `GET` | `/books` | List books; optionally filter with `?shelf=` |
-| `GET` | `/books/search` | Return up to five distinct ISBN-bearing candidates without storing them |
+| `GET` | `/books/search` | Return one page of distinct ISBN-bearing candidates without storing them |
 | `POST` | `/books` | Add the selected ISBN; return 404 without an ISBN or 409 when it already exists |
 | `GET` | `/books/{id}` | Return one book with its reviews |
 | `PATCH` | `/books/{id}/shelf` | Move a book to another shelf |
@@ -328,49 +345,55 @@ single user's existing review.
 
 ### Search parameters
 
-`GET /books/search` takes exactly one of these; omitting all three returns 422.
+`GET /books/search` requires exactly one of `title` and `author`. Sending neither, or
+both, returns 422: the caller has to say which catalogue index to query, because
+strings like `Dune` and `Harry Potter` name both a book and a person.
 
-| Parameter | Searches | Used by |
+| Parameter | Meaning | Default |
 |---|---|---|
-| `q` | Titles and authors, merged | The browser, whose one box cannot say which was typed |
-| `title` | Titles only | Clients that already know, and testing one index in isolation |
-| `author` | Authors only | Clients that already know, and testing one index in isolation |
-
-Each candidate carries `matched`, either `title` or `author`, so a merged list can say
-why a book is being offered. The browser labels only author matches, since a title
-match needs no explanation.
+| `title` | Search book titles | — |
+| `author` | Search book authors | — |
+| `page` | 1-based page number | `1` |
+| `per_page` | Candidates per page, 1 to 50 | `10` |
 
 ### Example search response
 
 ```json
-[
-  {
-    "title": "Nineteen Eighty-Four",
-    "author": "George Orwell",
-    "isbn": "9780451524935",
-    "cover_url": "https://covers.openlibrary.org/b/isbn/9780451524935-M.jpg",
-    "year": 1949,
-    "matched": "author"
-  }
-]
+{
+  "items": [
+    {
+      "title": "Nineteen Eighty-Four",
+      "author": "George Orwell",
+      "isbn": "9780451524935",
+      "cover_url": "https://covers.openlibrary.org/b/isbn/9780451524935-M.jpg",
+      "year": 1949
+    }
+  ],
+  "page": 1,
+  "per_page": 10,
+  "pages": 43,
+  "total": 421
+}
 ```
+
+`total` and `pages` come from the catalogue's count of what it matched. Candidates
+without an ISBN are dropped after a page is fetched, so a page can hold fewer than
+`per_page` items while later pages still exist.
 
 ### Example add request
 
 ```json
 {
   "title": "Nineteen Eighty-Four",
-  "query": "George Orwell",
   "isbn": "9780451524935",
   "shelf": "reading"
 }
 ```
 
-`query` is what the user typed. The server re-runs that same search before trusting
-the ISBN, so a client cannot invent a title, author, or cover for one. It has to be
-the same search: a book found by its author is not necessarily found by its own
-title, so omitting `query` here would fail to confirm the candidate and return 404.
-Sending only `title` remains valid for clients written before author search existed.
+The ISBN identifies the book, so the server resolves it against the catalogue and uses
+what it finds. Nothing else in the request is trusted: `title` is used only when no
+ISBN is given, the contract that existed before the search UI. An ISBN the catalogue
+does not know returns 404 and stores nothing.
 
 ### Example successful response
 
@@ -399,14 +422,15 @@ and cover identifiers.
 
 Studio 5 requires the team to design 5-10 AI-facing tool signatures and implement
 at least one tool end to end. The implemented Shelf Life catalogue tools are
-`search_book` and `search_by_author`; the remaining signatures are planned and must
-not be described as implemented until their code and tests exist.
+`search_book`, `search_by_author`, and `get_book_details`; the remaining signatures
+are planned and must not be described as implemented until their code and tests
+exist.
 
 | Tool | When the AI should use it | Parameters | Returns |
 |---|---|---|---|
-| `search_book` | The user gives a full or partial title and wants likely matches. | `title: str` | A readable list of up to five normalized Open Library matches. |
-| `search_by_author` | The user names a writer rather than a book and wants the books that writer wrote. | `author: str` | A readable list of up to five normalized Open Library matches. |
-| `get_book_details` | The user provides an ISBN or selects one search result and wants its details. | `isbn: str` | Title, author, year, ISBN, cover, and later subject information. |
+| `search_book` | The user gives a full or partial title and wants likely matches. | `title: str`, `limit: int = 5`, `offset: int = 0` | One page of normalized Open Library matches, and the total match count. |
+| `search_by_author` | The user names a writer rather than a book and wants the books that writer wrote. | `author: str`, `limit: int = 5`, `offset: int = 0` | One page of normalized Open Library matches, and the total match count. |
+| `get_book_details` | The user provides an ISBN, or has selected one search result and wants that edition's details. | `isbn: str` | Title, author, year, ISBN, and cover for that one book. |
 | `list_shelf` | The user asks what is currently on one personal shelf. | `shelf: str` | Books on Reading, Finished, Wishlist, or all shelves. |
 | `get_reading_stats` | The user asks for totals, progress, reviews, or average rating. | none | Current shelf counts, review count, and average rating. |
 | `add_book` | The user explicitly asks to save a title to their tracker. | `title: str`, `shelf: str = "reading"` | The stored book and selected shelf. |
@@ -419,12 +443,15 @@ workflow for destructive tools.
 
 #### Studio 5 implemented tool
 
-`search_book(title: str)` and `search_by_author(author: str)`:
+`search_book(title: str, limit: int, offset: int)` and
+`search_by_author(author: str, limit: int, offset: int)`:
 
 - trim the query and accept 1-300 characters;
+- accept a `limit` of 1 to 50 and a non-negative `offset`, and report the total match
+  count so a caller can page without guessing;
 - reuse `app.openlibrary.search_book` and `app.openlibrary.search_author` instead of
   duplicating HTTP code;
-- return at most five formatted, AI-readable results;
+- return at most `limit` formatted, AI-readable results, defaulting to five;
 - also return structured book data for the web application;
 - return clear no-result and temporary-unavailable messages; and
 - do not reveal raw exceptions or Open Library response JSON.
@@ -457,12 +484,16 @@ colored Shelf Life page was then run with the default `mcp` backend; adding the 
 title produced live MCP metadata on the Reading shelf. Claude Desktop remains
 unverified because the team's new Claude account could not access the service.
 
-On 2026-08-05, `search_by_author` was verified against the live catalogue through the
-running application on the default `mcp` backend, not through Inspector. Searching
-`George Orwell` returned Nineteen Eighty-Four and Animal Farm, `Ursula K. Le Guin`
-returned three of her novels, `The Hobbit` was unchanged, and `Dune` and `Sapiens`
-returned no author noise. Selecting an author-matched result stored it with complete
-metadata. Inspector discovery of the second tool remains to be recorded.
+On 2026-08-05, author search and paging were verified against the live catalogue
+through the running application on the default `mcp` backend, not through Inspector.
+An author search for `George Orwell` returned Nineteen Eighty-Four and Animal Farm,
+and `J. K. Rowling` returned all seven Harry Potter novels on page 1 of 43. A title
+search for `Harry Potter` returned the seven novels on page 1 of 311, and page 2
+returned nine candidates rather than ten because one lacked an ISBN, which is the
+documented short-page behaviour. Every ISBN offered on the first page of four separate
+searches resolved through `get_book_details`, 40 of 40, which is what confirming an
+addition depends on. Inspector discovery of the second and third tools remains to be
+recorded.
 
 ## 12. Current Repository Structure
 
@@ -482,6 +513,8 @@ app/
     reviews.py
   services/
     __init__.py
+    books.py
+    reviews.py
     search.py
     stats.py
 seed/
@@ -496,6 +529,7 @@ tests/
   test_author_search.py
   test_books.py
   test_lookup.py
+  test_search_paging.py
   test_mcp_client.py
   test_mcp_server.py
   test_openlibrary.py
@@ -510,9 +544,9 @@ README.md
 requirements.txt
 ```
 
-The Studio 5 server exposes `search_book` and `search_by_author` through FastMCP over
-STDIO. The FastAPI application calls the same tools through its in-memory MCP client
-adapter and preserves seed fallback.
+The Studio 5 server exposes `search_book`, `search_by_author`, and
+`get_book_details` through FastMCP over STDIO. The FastAPI application calls the same
+tools through its in-memory MCP client adapter and preserves seed fallback.
 
 ## 13. Implementation Plan
 

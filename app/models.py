@@ -11,14 +11,13 @@ Shelf = Literal["reading", "finished", "wishlist"]
 class BookCreate(BaseModel):
     """Add a searched book; ISBN identifies the candidate the user selected.
 
-    ``query`` is what the user actually typed into the search box, which may have
-    been an author's name.  It is sent back so the server can re-run the same
-    search the candidate came from before trusting the ISBN; without it, a book
-    found by author would be looked for by title and never confirmed.
+    Only the ISBN is needed to confirm the book, because an ISBN identifies it:
+    the server asks the catalogue about that ISBN rather than trusting any
+    metadata sent alongside. ``title`` is used only when no ISBN is given, the
+    contract that existed before the search UI.
     """
 
     title: str = Field(min_length=1, max_length=300)
-    query: str | None = Field(default=None, max_length=300)
     isbn: str | None = Field(default=None, max_length=32)
     shelf: Shelf = "reading"
 
@@ -29,14 +28,6 @@ class BookCreate(BaseModel):
         if not stripped:
             raise ValueError("title must not be blank")
         return stripped
-
-    @field_validator("query")
-    @classmethod
-    def strip_query(cls, value: str | None) -> str | None:
-        """A blank query is no query, not a search for nothing."""
-        if value is None:
-            return None
-        return value.strip() or None
 
 
 class ShelfUpdate(BaseModel):
@@ -69,18 +60,28 @@ class Book(BaseModel):
 
 
 class BookCandidate(BaseModel):
-    """One search result the user can choose to add.
-
-    ``matched`` says which search produced it, so a merged list can tell the user
-    why a book is being offered: its title matched, or its author did.
-    """
+    """One search result the user can choose to add."""
 
     title: str
     author: str | None
     isbn: str
     cover_url: str | None
     year: int | None
-    matched: Literal["title", "author"]
+
+
+class SearchResults(BaseModel):
+    """One page of candidates, and where that page sits in the whole result set.
+
+    ``total`` and therefore ``pages`` come from the catalogue's own count, which
+    counts what it matched rather than what survived filtering, so a page can
+    hold fewer than ``per_page`` items while later pages still exist.
+    """
+
+    items: list[BookCandidate]
+    page: int
+    per_page: int
+    pages: int
+    total: int
 
 
 class BookWithReviews(Book):

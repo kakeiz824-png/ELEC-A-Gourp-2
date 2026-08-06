@@ -11,7 +11,7 @@ import sys
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 
-from app.details import BookDetails
+from app.details import BookDetails, SearchPage
 from app.openlibrary import LookupUnavailable
 from mcp_server import server
 
@@ -46,7 +46,11 @@ def test_server_registers_both_searches_with_ai_facing_descriptions() -> None:
     tools = asyncio.run(list_tools())
     described = {tool.name: tool.description for tool in tools}
 
-    assert sorted(described) == ["search_book", "search_by_author"]
+    assert sorted(described) == [
+        "get_book_details",
+        "search_book",
+        "search_by_author",
+    ]
     for description in described.values():
         assert "Use this tool when" in description
 
@@ -63,7 +67,11 @@ def test_server_starts_over_stdio_like_a_desktop_mcp_client() -> None:
 
     tools = asyncio.run(list_tools())
 
-    assert sorted(tool.name for tool in tools) == ["search_book", "search_by_author"]
+    assert sorted(tool.name for tool in tools) == [
+        "get_book_details",
+        "search_book",
+        "search_by_author",
+    ]
 
 
 def test_search_book_returns_readable_normalized_results(monkeypatch) -> None:
@@ -77,7 +85,11 @@ def test_search_book_returns_readable_normalized_results(monkeypatch) -> None:
         ),
         BookDetails(title="The Hobbit: Graphic Novel", author="Chuck Dixon"),
     ]
-    monkeypatch.setattr(server, "search_open_library", lambda title: results)
+    monkeypatch.setattr(
+        server,
+        "search_open_library",
+        lambda title, **paging: SearchPage(results=results, total=len(results)),
+    )
 
     text = call_search_book("  The Hobbit  ")
 
@@ -101,7 +113,7 @@ def test_search_book_returns_readable_normalized_results(monkeypatch) -> None:
 
 
 def test_search_book_rejects_a_blank_title_without_a_lookup(monkeypatch) -> None:
-    def fail_if_called(title: str):
+    def fail_if_called(title: str, **paging):
         raise AssertionError("blank input must not call Open Library")
 
     monkeypatch.setattr(server, "search_open_library", fail_if_called)
@@ -110,7 +122,7 @@ def test_search_book_rejects_a_blank_title_without_a_lookup(monkeypatch) -> None
 
 
 def test_search_book_rejects_an_overlong_title_without_a_lookup(monkeypatch) -> None:
-    def fail_if_called(title: str):
+    def fail_if_called(title: str, **paging):
         raise AssertionError("overlong input must not call Open Library")
 
     monkeypatch.setattr(server, "search_open_library", fail_if_called)
@@ -121,7 +133,9 @@ def test_search_book_rejects_an_overlong_title_without_a_lookup(monkeypatch) -> 
 
 
 def test_search_book_reports_no_matches(monkeypatch) -> None:
-    monkeypatch.setattr(server, "search_open_library", lambda title: [])
+    monkeypatch.setattr(
+        server, "search_open_library", lambda title, **paging: SearchPage([], 0)
+    )
 
     assert (
         call_search_book("A Missing Book")
@@ -130,7 +144,7 @@ def test_search_book_reports_no_matches(monkeypatch) -> None:
 
 
 def test_search_book_hides_catalogue_failures_from_the_client(monkeypatch) -> None:
-    def unavailable(title: str):
+    def unavailable(title: str, **paging):
         raise LookupUnavailable("internal network details")
 
     monkeypatch.setattr(server, "search_open_library", unavailable)

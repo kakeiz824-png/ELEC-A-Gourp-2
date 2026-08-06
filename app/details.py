@@ -28,6 +28,24 @@ class BookDetails:
     cover_url: str | None = None
 
 
+@dataclass(frozen=True)
+class SearchPage:
+    """One slice of a search, plus how many results it was cut from.
+
+    ``total`` is what the catalogue reports for the whole query, not the length
+    of ``results``, so a caller can say "page 3 of 43" without fetching the other
+    42.  It counts what the catalogue matched: results lacking an ISBN are
+    dropped later, so a page can be shorter than the slice that was asked for.
+    """
+
+    results: list[BookDetails]
+    total: int
+
+    @property
+    def empty(self) -> bool:
+        return not self.results
+
+
 def normalise(title: str) -> str:
     """Fold a title down to something two spellings of it can both reach."""
     lowered = title.strip().lower()

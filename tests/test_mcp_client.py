@@ -4,7 +4,7 @@ import pytest
 
 from app import lookup as lookup_module
 from app import mcp_client
-from app.details import BookDetails
+from app.details import BookDetails, SearchPage
 from app.openlibrary import LookupUnavailable
 from mcp_server import server
 
@@ -23,19 +23,25 @@ def test_client_converts_structured_tool_results_to_book_details(monkeypatch) ->
         year=1937,
         cover_url="https://covers.example/hobbit.jpg",
     )
-    monkeypatch.setattr(server, "search_open_library", lambda title: [expected])
+    monkeypatch.setattr(
+        server,
+        "search_open_library",
+        lambda title, **paging: SearchPage(results=[expected], total=1),
+    )
 
-    assert mcp_client.search_book("The Hobbit") == [expected]
+    assert mcp_client.search_book("The Hobbit").results == [expected]
 
 
 def test_client_returns_an_empty_list_for_no_match(monkeypatch) -> None:
-    monkeypatch.setattr(server, "search_open_library", lambda title: [])
+    monkeypatch.setattr(
+        server, "search_open_library", lambda title, **paging: SearchPage([], 0)
+    )
 
-    assert mcp_client.search_book("A Missing Book") == []
+    assert mcp_client.search_book("A Missing Book").results == []
 
 
 def test_client_maps_tool_failure_to_mcp_unavailable(monkeypatch) -> None:
-    def unavailable(title: str):
+    def unavailable(title: str, **paging):
         raise LookupUnavailable("internal network details")
 
     monkeypatch.setattr(server, "search_open_library", unavailable)
@@ -62,9 +68,9 @@ def test_lookup_uses_the_mcp_backend(monkeypatch) -> None:
     )
     seen: list[str] = []
 
-    def search(title: str) -> list[BookDetails]:
+    def search(title: str, **paging) -> SearchPage:
         seen.append(title)
-        return [expected]
+        return SearchPage(results=[expected], total=1)
 
     monkeypatch.setenv(lookup_module.BACKEND_ENV, lookup_module.MCP_BACKEND)
     monkeypatch.setattr(mcp_client, "search_book", search)
@@ -74,7 +80,7 @@ def test_lookup_uses_the_mcp_backend(monkeypatch) -> None:
 
 
 def test_lookup_falls_back_to_seed_when_mcp_is_unavailable(monkeypatch) -> None:
-    def unavailable(title: str):
+    def unavailable(title: str, **paging):
         raise mcp_client.MCPUnavailable("server is down")
 
     monkeypatch.setenv(lookup_module.BACKEND_ENV, lookup_module.MCP_BACKEND)
@@ -97,7 +103,11 @@ def test_adding_a_book_through_the_web_api_uses_mcp(
         cover_url="https://covers.example/hobbit.jpg",
     )
     monkeypatch.setenv(lookup_module.BACKEND_ENV, lookup_module.MCP_BACKEND)
-    monkeypatch.setattr(mcp_client, "search_book", lambda title: [expected])
+    monkeypatch.setattr(
+        mcp_client,
+        "search_book",
+        lambda title, **paging: SearchPage(results=[expected], total=1),
+    )
 
     response = client.post("/books", json={"title": "The Hobbit"})
 

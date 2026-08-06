@@ -20,7 +20,14 @@ from typing import Any
 
 import httpx
 
-from app.details import BookDetails, cover_url_by_id, cover_url_by_isbn, normalise, year_from
+from app.details import (
+    BookDetails,
+    SearchPage,
+    cover_url_by_id,
+    cover_url_by_isbn,
+    normalise,
+    year_from,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -122,7 +129,35 @@ def _doc_to_details(doc: object) -> BookDetails | None:
     )
 
 
-def search_book(title: str) -> list[BookDetails]:
+def _total(payload: dict, fallback: int) -> int:
+    """How many results the catalogue says the whole query has."""
+    found = payload.get("numFound")
+    if isinstance(found, bool) or not isinstance(found, int) or found < 0:
+        return fallback
+    return found
+
+
+def _docs(payload: object, label: str) -> tuple[list, int]:
+    """The raw result docs and the reported total, or raise."""
+    if not isinstance(payload, dict):
+        raise LookupUnavailable(f"Open Library {label} did not return an object")
+    docs = payload.get("docs")
+    if not isinstance(docs, list):
+        return [], 0
+    return docs, _total(payload, len(docs))
+
+
+def _details_page(docs: list, total: int) -> SearchPage:
+    """Map result docs to a page, dropping any that have no title."""
+    mapped = (_doc_to_details(doc) for doc in docs)
+    return SearchPage(
+        results=[details for details in mapped if details is not None], total=total
+    )
+
+
+def search_book(
+    title: str, *, limit: int = SEARCH_LIMIT, offset: int = 0
+) -> SearchPage:
     """Search Open Library by title, then fall back to its broad query.
 
     Open Library already returns its own relevance order, which is better than
@@ -130,31 +165,40 @@ def search_book(title: str) -> list[BookDetails]:
     """
     query = normalise(title)
     if not query:
-        return []
+        return SearchPage(results=[], total=0)
 
-    payload = _get_json(
-        SEARCH_URL,
-        {"title": title.strip(), "limit": SEARCH_LIMIT, "fields": SEARCH_FIELDS},
-    )
-    if not isinstance(payload, dict):
-        raise LookupUnavailable("Open Library search did not return an object")
-
-    docs = payload.get("docs")
-    if not isinstance(docs, list):
-        return []
-    if not docs:
-        payload = _get_json(
+    docs, total = _docs(
+        _get_json(
             SEARCH_URL,
-            {"q": title.strip(), "limit": SEARCH_LIMIT, "fields": SEARCH_FIELDS},
+            {
+                "title": title.strip(),
+                "limit": limit,
+                "offset": offset,
+                "fields": SEARCH_FIELDS,
+            },
+        ),
+        "search",
+    )
+    if total == 0:
+        # The title index knows nothing about this string, so try the broad
+        # query, which also reads subjects and descriptions.  This is decided
+        # from the reported total rather than from this page being empty, so
+        # asking for page 5 of a broad-query search does not silently fall back
+        # to the title index for every page past the end.
+        docs, total = _docs(
+            _get_json(
+                SEARCH_URL,
+                {
+                    "q": title.strip(),
+                    "limit": limit,
+                    "offset": offset,
+                    "fields": SEARCH_FIELDS,
+                },
+            ),
+            "broad search",
         )
-        if not isinstance(payload, dict):
-            raise LookupUnavailable("Open Library broad search did not return an object")
-        docs = payload.get("docs")
-        if not isinstance(docs, list):
-            return []
 
-    results = [_doc_to_details(doc) for doc in docs]
-    return [details for details in results if details is not None]
+    return _details_page(docs, total)
 
 
 def _author_tokens(author: str) -> list[str]:
@@ -185,37 +229,44 @@ def _doc_is_by_author(doc: object, tokens: list[str]) -> bool:
     return all(token in normalised for token in tokens)
 
 
-def search_author(author: str) -> list[BookDetails]:
+def search_author(
+    author: str, *, limit: int = SEARCH_LIMIT, offset: int = 0
+) -> SearchPage:
     """Search Open Library for books written by an author, best match first.
 
     ``author=`` queries the catalogue's author index, so unlike a title search
     it returns the author's own works instead of biographies and study guides
     whose titles happen to contain their name.  Open Library's own relevance
     order is kept, as in ``search_book``.
+
+    The relevance filter runs over one page, so ``total`` counts what the
+    catalogue matched rather than what survives filtering.  A page can therefore
+    be shorter than the one before it.
     """
     query = normalise(author)
     if not query:
-        return []
+        return SearchPage(results=[], total=0)
 
-    payload = _get_json(
-        SEARCH_URL,
-        {"author": author.strip(), "limit": SEARCH_LIMIT, "fields": SEARCH_FIELDS},
+    docs, total = _docs(
+        _get_json(
+            SEARCH_URL,
+            {
+                "author": author.strip(),
+                "limit": limit,
+                "offset": offset,
+                "fields": SEARCH_FIELDS,
+            },
+        ),
+        "author search",
     )
-    if not isinstance(payload, dict):
-        raise LookupUnavailable("Open Library author search did not return an object")
-
-    docs = payload.get("docs")
-    if not isinstance(docs, list):
-        return []
 
     tokens = _author_tokens(author)
     if tokens:
-        # Never let the relevance filter empty a result set: an author credited
-        # only as a co-author would otherwise vanish rather than rank low.
+        # Never let the relevance filter empty a page: an author credited only
+        # as a co-author would otherwise vanish rather than rank low.
         docs = [doc for doc in docs if _doc_is_by_author(doc, tokens)] or docs
 
-    results = [_doc_to_details(doc) for doc in docs]
-    return [details for details in results if details is not None]
+    return _details_page(docs, total)
 
 
 def get_book_details(isbn: str) -> BookDetails | None:

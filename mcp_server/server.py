@@ -96,6 +96,20 @@ def _unavailable() -> ToolResult:
     )
 
 
+def _normalise_query(raw: str) -> str:
+    """Collapse whitespace runs and drop control characters, keeping punctuation.
+
+    Newlines, tabs, repeated spaces, and non-breaking spaces all become one
+    space, so "Harry\n\nPotter" and "Harry Potter" reach the catalogue as the
+    same query. Punctuation like ":", "'", "&" and "." is left alone because
+    titles legitimately contain it.
+    """
+    cleaned = "".join(
+        char if char.isprintable() else " " if char.isspace() else ""
+        for char in raw
+    )
+    return " ".join(cleaned.split())
+
 def _search_result(
     raw: str,
     *,
@@ -106,7 +120,7 @@ def _search_result(
     limit: int,
     offset: int,
 ) -> ToolResult:
-    """Validate one query, run a catalogue search, and shape the MCP result.
+    """Normalise and validate one query, run a catalogue search, and shape the MCP result.
 
     Both searches report the same four outcomes -- invalid input, catalogue
     unavailable, no match, and ok -- so the shapes live here and each tool keeps
@@ -114,7 +128,7 @@ def _search_result(
     match is described in the readable text: books "matching" a title, but books
     "written by" an author.
     """
-    query = raw.strip()
+    query = _normalise_query(raw)
     if not query:
         return _invalid(f"{field} must not be blank.")
     if len(query) > max_length:

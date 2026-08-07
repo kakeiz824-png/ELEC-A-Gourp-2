@@ -246,6 +246,16 @@ Add to `tests/test_mcp_server.py`:
 Both search tools normalise identically, the tests above pass, and the length limit
 is measured on the normalised string.
 
+### Status
+
+Implemented 2026-08-06 on `feature/mcp-input-normalisation`. `_search_result`
+normalises every query through `_normalise_query`: whitespace runs (including
+newlines, tabs, and non-breaking spaces) collapse to one space, control
+characters are dropped, punctuation is preserved, and the length limit is
+measured on the normalised string. Both search tools share the helper. Five
+tests added; full suite 172 passed. Committed to `feature/mcp-input-normalisation` on 2026-08-06.
+
+
 ## Item 4 - Generic exception handling in the MCP tools
 
 Emma Zhou, marked suggestion.

@@ -194,3 +194,93 @@ def test_search_book_logs_the_unexpected_exception_for_diagnostics(
     call_search_result("The Hobbit")
 
     assert "internal mapping bug" in caplog.text
+
+def call_search_by_author(author: str) -> str:
+    """Call the registered author tool and return its readable text content."""
+
+    async def call():
+        async with Client(server.mcp) as client:
+            return await client.call_tool(
+                "search_by_author",
+                {"author": author},
+                raise_on_error=False,
+            )
+
+    return asyncio.run(call()).content[0].text
+
+
+def test_search_book_collapses_whitespace_and_drops_control_characters(
+    monkeypatch,
+) -> None:
+    """Newlines, tabs, repeated spaces and NBSP reach the search single-spaced."""
+    received: dict[str, str] = {}
+
+    def record(title: str, **paging):
+        received["query"] = title
+        return SearchPage([], 0)
+
+    monkeypatch.setattr(server, "search_open_library", record)
+
+    call_search_book("  The\u00a0Hobbit\n\n  \tPart   One!  ")
+
+    assert received["query"] == "The Hobbit Part One!"
+
+
+def test_search_book_rejects_control_characters_only(monkeypatch) -> None:
+    def fail_if_called(title: str, **paging):
+        raise AssertionError("control-only input must not call Open Library")
+
+    monkeypatch.setattr(server, "search_open_library", fail_if_called)
+
+    assert (
+        call_search_book("\x00\x01\x02\x1f") == "Error: title must not be blank."
+    )
+
+
+def test_the_length_limit_is_measured_after_normalisation(monkeypatch) -> None:
+    received: dict[str, str] = {}
+
+    def record(title: str, **paging):
+        received["query"] = title
+        return SearchPage([], 0)
+
+    monkeypatch.setattr(server, "search_open_library", record)
+
+    call_search_book("The" + " " * (server.MAX_TITLE_LENGTH + 100) + "Hobbit")
+
+    assert received["query"] == "The Hobbit"
+
+
+def test_search_book_keeps_title_punctuation(monkeypatch) -> None:
+    received: dict[str, str] = {}
+
+    def record(title: str, **paging):
+        received["query"] = title
+        return SearchPage([], 0)
+
+    monkeypatch.setattr(server, "search_open_library", record)
+
+    call_search_book("Dune: Part 'One' & Two.")
+
+    assert received["query"] == "Dune: Part 'One' & Two."
+
+
+def test_both_search_tools_normalise_identically(monkeypatch) -> None:
+    received: dict[str, str] = {}
+
+    def record_title(title: str, **paging):
+        received["title"] = title
+        return SearchPage([], 0)
+
+    def record_author(author: str, **paging):
+        received["author"] = author
+        return SearchPage([], 0)
+
+    monkeypatch.setattr(server, "search_open_library", record_title)
+    monkeypatch.setattr(server, "search_open_library_author", record_author)
+
+    call_search_book("  J.\nK.\t Rowling  ")
+    call_search_by_author("  J.\nK.\t Rowling  ")
+
+    assert received["title"] == "J. K. Rowling"
+    assert received["author"] == "J. K. Rowling"

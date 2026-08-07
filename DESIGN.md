@@ -262,6 +262,13 @@ request, and keeps the property the re-search existed for: metadata comes from t
 catalogue, never from the client. It also required exposing the third planned M2 tool,
 which is why `get_book_details` is now implemented rather than pending.
 
+Future work: group editions under a work. Open Library exposes a work key
+(`key`, e.g. `/works/OL82563W`) that would support it. One book can have
+several editions with different ISBNs, and tracking each edition is deliberate
+(`CLAUDE.md`: allow books with the same title when their ISBNs differ), but a
+broad author search surfaces many editions and translations of the same work.
+Grouping them would make the result list easier to scan.
+
 ## 8. System Architecture
 
 ```text

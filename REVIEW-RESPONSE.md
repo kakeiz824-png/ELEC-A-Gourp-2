@@ -440,6 +440,12 @@ backlog item against `DESIGN.md` section 7.7, and change nothing now.
 The comment has a written reply and an edition-grouping item exists in
 `DESIGN.md`'s future work.
 
+### Status
+
+Reply drafted 2026-08-06; the user posts it on the review thread once approved.
+Edition-grouping backlog item added to `DESIGN.md` section 7.7 on
+`feature/item6-reply-and-backlog`. Committed on 2026-08-06.
+
 ## Sequencing
 
 1. **Item 2** - finish the browser check, then commit and push. Everything else

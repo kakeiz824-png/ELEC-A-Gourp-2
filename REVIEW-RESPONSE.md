@@ -327,6 +327,15 @@ Add to `tests/test_mcp_server.py` and `tests/test_search_paging.py`:
 No unexpected exception can leave a tool without a structured `unavailable`
 envelope, and no internal message appears in tool text.
 
+### Status
+
+Implemented 2026-08-06 on `feature/mcp-exception-handling`. Both tools catch
+unexpected exceptions after `LookupUnavailable`, return the standard `_unavailable()`
+envelope, and log the detail with `logger.exception`. Four tests added: search tool,
+details tool, server-side log, and the seed-fallback chain. Full suite 167 passed.
+Committed to `feature/mcp-exception-handling` on 2026-08-06.
+
+
 ## Item 5 - `_format_book` duplicates the field list
 
 Emma Zhou, marked nitpick. Agreed as stated.

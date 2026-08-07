@@ -51,28 +51,29 @@ def _show(value: object | None) -> str:
     return str(value) if value not in (None, "") else "Unknown"
 
 
+_BOOK_FIELDS: tuple[tuple[str, str], ...] = (
+    ("title", "Title"),
+    ("author", "Author"),
+    ("year", "First published"),
+    ("isbn", "ISBN"),
+    ("cover_url", "Cover"),
+)
+
+
 def _format_book(position: int, book: BookDetails) -> str:
     """Format one normalized catalogue result for an AI client."""
-    return "\n".join(
-        [
-            f"{position}. {book.title}",
-            f"   Author: {_show(book.author)}",
-            f"   First published: {_show(book.year)}",
-            f"   ISBN: {_show(book.isbn)}",
-            f"   Cover: {_show(book.cover_url)}",
-        ]
+    lines = [f"{position}. {book.title}"]
+    lines.extend(
+        f"   {label}: {_show(getattr(book, name))}"
+        for name, label in _BOOK_FIELDS
+        if name != "title"
     )
+    return "\n".join(lines)
 
 
 def _book_payload(book: BookDetails) -> dict[str, str | int | None]:
     """Return the stable data shape consumed by application-side MCP clients."""
-    return {
-        "title": book.title,
-        "author": book.author,
-        "isbn": book.isbn,
-        "year": book.year,
-        "cover_url": book.cover_url,
-    }
+    return {name: getattr(book, name) for name, _ in _BOOK_FIELDS}
 
 
 def _invalid(message: str) -> ToolResult:

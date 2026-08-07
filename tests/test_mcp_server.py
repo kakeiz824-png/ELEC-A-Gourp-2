@@ -284,3 +284,32 @@ def test_both_search_tools_normalise_identically(monkeypatch) -> None:
 
     assert received["title"] == "J. K. Rowling"
     assert received["author"] == "J. K. Rowling"
+
+def test_readable_and_structured_outputs_share_one_field_set() -> None:
+    """A field added to one rendering must appear in the other."""
+
+    book = BookDetails(
+        title="The Hobbit",
+        author="J.R.R. Tolkien",
+        isbn="9780261103344",
+        year=1937,
+        cover_url="https://covers.example/hobbit.jpg",
+    )
+
+    payload = server._book_payload(book)
+    lines = server._format_book(1, book).splitlines()
+
+    labels = {
+        "Author": "author",
+        "First published": "year",
+        "ISBN": "isbn",
+        "Cover": "cover_url",
+    }
+    names = {"title"}
+    for line in lines:
+        label, _, _ = line.strip().partition(": ")
+        if label in labels:
+            names.add(labels[label])
+
+    assert names == set(payload)
+    assert len(lines) == len(payload)

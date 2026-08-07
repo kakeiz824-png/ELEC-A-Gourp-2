@@ -408,3 +408,40 @@ def test_the_isbn_lookup_falls_back_to_the_seed_when_mcp_is_unavailable(
 
     assert details is not None
     assert details.title == "Nineteen Eighty-Four"
+
+def test_the_details_tool_hides_unexpected_exceptions(monkeypatch) -> None:
+    """An unexpected bug must look like an outage, and stay out of client text."""
+
+    def explode(isbn: str):
+        raise RuntimeError("internal mapping bug")
+
+    monkeypatch.setattr(server, "open_library_details", explode)
+
+    result = call_details_tool(SEEDED_ISBN)
+
+    assert result.structured_content == {
+        "status": "unavailable",
+        "books": [],
+        "total": 0,
+    }
+    text = result.content[0].text
+    assert "internal mapping bug" not in text
+    assert "temporarily unavailable" in text
+
+
+def test_the_title_search_falls_back_to_the_seed_when_mcp_is_unavailable(
+    monkeypatch,
+) -> None:
+    """An unexpected tool error must degrade to the seed like an outage."""
+
+    def explode(title: str, **paging):
+        raise RuntimeError("internal mapping bug")
+
+    monkeypatch.setenv(lookup_module.BACKEND_ENV, lookup_module.MCP_BACKEND)
+    monkeypatch.setattr(server, "search_open_library", explode)
+
+    page = lookup_module.search_book("The Hobbit")
+
+    assert page.results
+    assert page.results[0].title == "The Hobbit"
+    assert page.results[0].author == "J. R. R. Tolkien"

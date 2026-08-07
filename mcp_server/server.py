@@ -14,6 +14,7 @@ an add is confirmed: the ISBN identifies the book, so nothing has to trust
 metadata a client sent.
 """
 
+import logging
 from collections.abc import Callable
 
 from fastmcp import FastMCP
@@ -25,6 +26,8 @@ from app.openlibrary import get_book_details as open_library_details
 from app.openlibrary import search_author as search_open_library_author
 from app.openlibrary import search_book as search_open_library
 
+
+logger = logging.getLogger(__name__)
 
 MAX_TITLE_LENGTH = 300
 MAX_AUTHOR_LENGTH = 300
@@ -125,6 +128,9 @@ def _search_result(
         page = search(query, limit=limit, offset=offset)
     except LookupUnavailable:
         return _unavailable()
+    except Exception:
+        logger.exception("Unexpected failure in the %s search", field)
+        return _unavailable()
 
     if not page.results:
         return ToolResult(
@@ -216,6 +222,9 @@ def get_book_details(isbn: str) -> ToolResult:
     try:
         book = open_library_details(key)
     except LookupUnavailable:
+        return _unavailable()
+    except Exception:
+        logger.exception("Unexpected failure resolving ISBN %r", key)
         return _unavailable()
 
     if book is None:

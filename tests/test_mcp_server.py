@@ -5,6 +5,7 @@ access the network.
 """
 
 import asyncio
+import logging
 from pathlib import Path
 import sys
 
@@ -156,3 +157,40 @@ def test_search_book_hides_catalogue_failures_from_the_client(monkeypatch) -> No
         "Please try this book search again later."
     )
     assert "internal network details" not in text
+
+def test_search_book_hides_unexpected_exceptions_from_the_client(
+    monkeypatch,
+) -> None:
+    """An unexpected bug must look like an outage, and stay out of client text."""
+
+    def explode(title: str, **paging):
+        raise RuntimeError("internal mapping bug")
+
+    monkeypatch.setattr(server, "search_open_library", explode)
+
+    result = call_search_result("The Hobbit")
+
+    assert result.structured_content == {
+        "status": "unavailable",
+        "books": [],
+        "total": 0,
+    }
+    text = result.content[0].text
+    assert "internal mapping bug" not in text
+    assert "temporarily unavailable" in text
+
+
+def test_search_book_logs_the_unexpected_exception_for_diagnostics(
+    monkeypatch, caplog
+) -> None:
+    """The internal detail is logged server-side, never shown to the client."""
+
+    def explode(title: str, **paging):
+        raise RuntimeError("internal mapping bug")
+
+    monkeypatch.setattr(server, "search_open_library", explode)
+    caplog.set_level(logging.ERROR, logger="mcp_server.server")
+
+    call_search_result("The Hobbit")
+
+    assert "internal mapping bug" in caplog.text

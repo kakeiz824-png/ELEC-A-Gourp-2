@@ -31,7 +31,7 @@ Searching an author's name returns the books that author wrote. This needs its o
 
 ## Current Integration Status
 
-Shelf Life currently calls the keyless Open Library API directly through `app/openlibrary.py`.
+Shelf Life queries the keyless Open Library API through its local MCP tools (`app/mcp_client.py` to `mcp_server/server.py`), with a direct `app/openlibrary.py` path kept for diagnostics.
 
 The application provides three Open Library functions:
 
@@ -41,7 +41,7 @@ The application provides three Open Library functions:
 
 Open Library responses are converted into the application's internal `BookDetails` format before reaching the API routes or database.
 
-The course-required MCP server has **not yet been completed**. A future M2 task is to expose these Open Library functions as MCP tools while preserving the current lookup and fallback behavior.
+The course-required MCP server is implemented in `mcp_server/server.py`, which exposes the same three functions as FastMCP tools (`search_book`, `search_by_author`, `get_book_details`). The FastAPI application calls these tools through `app/mcp_client.py` over FastMCP's in-memory transport, so the app and the MCP tools share one lookup path. External MCP clients can launch the server with `python -m mcp_server.server` (STDIO).
 
 ## Technology Stack
 
@@ -167,7 +167,7 @@ All configuration variables are optional.
 |---|---|---|
 | `SHELF_LIFE_DB` | `shelf_life.db` in the repository root | SQLite database location |
 | `SHELF_LIFE_ORIGINS` | `http://127.0.0.1:8000,http://localhost:8000` | Comma-separated CORS allowlist |
-| `SHELF_LIFE_LOOKUP_BACKEND` | `openlibrary` | Use `openlibrary` for live lookup or `seed` for offline lookup |
+| `SHELF_LIFE_LOOKUP_BACKEND` | `mcp` | Lookup through the local MCP tools (`mcp`), the direct Open Library client (`openlibrary`, diagnostics), or the offline seed (`seed`) |
 | `SHELF_LIFE_OPENLIBRARY_TIMEOUT` | `5` | Seconds to wait for Open Library before falling back |
 
 No Open Library account or API key is required.
@@ -208,6 +208,14 @@ When the candidate came from a search, send its ISBN. The server resolves the IS
 }
 ```
 
+## Deployment
+
+The application is deployed to Render: <https://shelf-life-3thw.onrender.com>
+
+- The Render Blueprint (`render.yaml`) starts the FastAPI app with `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+- The database is SQLite locally and Turso (cloud libSQL) in production: set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in the Render dashboard; `app/db.py` uses them automatically.
+- Deploys are manual: after merging to `main`, trigger **Manual Deploy -> Deploy latest commit** in the Render dashboard.
+- The MCP server runs in-process with the app (FastMCP in-memory transport); external clients can also start it with `python -m mcp_server.server` (STDIO).
 ## Running the Tests
 
 On Windows, run:
@@ -260,13 +268,22 @@ Completed:
 - Seed fallback
 - Mocked Open Library tests
 
+Remaining: none for the required scope. The MCP server, Semgrep scan, CI workflow, and AI usage log were completed during M2 (see M3 below).
+
+### M3: Deployed, Reviewed & Documented
+
+Completed:
+
+- Author search with the Title/Author selector and paged results
+- Cover placeholder fallback (including 1x1 transparent-image detection) and a five-minute live-lookup cache
+- Review-feedback remediation (card error handling, MCP input normalisation, MCP exception handling, field-list refactor, review reply) -- see `REVIEW-RESPONSE.md`
+- GitHub Actions CI and a Semgrep scan
+- Deployment to Render (public URL above)
+
 Remaining:
 
-- Implement the required MCP server
-- Expose Open Library functions as MCP tools
-- Run and review the required security scan
-- Select a realistically sized optional M2 extension
-
+- Trigger the final Render deployment of the latest `main`
+- Team retrospective and reflection (`RETROSPECTIVE.md`, `docs/team-reflection.md`)
 ## Future Roadmap
 
 Ideas under team discussion include:
@@ -288,3 +305,6 @@ These are roadmap candidates rather than a commitment to deliver every feature i
 - Read [`DESIGN.md`](DESIGN.md) for requirements and technical decisions.
 - Read [`GIT_GUIDE.md`](GIT_GUIDE.md) for the team Git workflow.
 - Read [`M1-REFLECTION.md`](M1-REFLECTION.md) for the M1 reflection.
+- Read [`REVIEW-RESPONSE.md`](REVIEW-RESPONSE.md) for how review feedback was processed.
+- Read [`RETROSPECTIVE.md`](RETROSPECTIVE.md) for the M3 team retrospective.
+- Read [`docs/team-reflection.md`](docs/team-reflection.md) for the M3 team reflection.

@@ -381,6 +381,16 @@ field set, so a future field cannot be added to only one.
 
 Field names and order are declared once, and the existing assertions still pass.
 
+### Status
+
+Implemented 2026-08-06 on `feature/format-book-refactor`. `_BOOK_FIELDS` declares
+each field's machine name and display label once; `_format_book` and
+`_book_payload` both derive from it, so a new field is one edit. The suggested
+`LINE_BREAK` constant was not added (`"\n".join(...)` is idiomatic and the
+newline now appears once). One invariant-guard test added; full suite 173
+passed. Committed to `feature/format-book-refactor` on 2026-08-06.
+
+
 ## Item 6 - An `id` field in `seed/books.json`
 
 Emma Zhou, marked nitpick. **Recommend not doing this.** The underlying observation

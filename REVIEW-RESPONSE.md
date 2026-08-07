@@ -440,6 +440,43 @@ backlog item against `DESIGN.md` section 7.7, and change nothing now.
 The comment has a written reply and an edition-grouping item exists in
 `DESIGN.md`'s future work.
 
+### Status
+
+Reply drafted and recorded in this file on 2026-08-06.
+Edition-grouping backlog item added to `DESIGN.md` section 7.7 on
+`feature/item6-reply-and-backlog`. Committed on 2026-08-06.
+
+### Reply
+
+Thanks for the careful review. We looked into this and decided not to add an
+`id` field to `seed/books.json`, for two reasons:
+
+1. The seed file is not a table and never becomes rows carrying its own
+   identifiers. It is the offline catalogue that stands in for Open Library
+   when the network is unavailable -- `app/lookup.py` reads the fields it needs
+   and builds the same `BookDetails` value the live catalogue produces. An `id`
+   added to the file would be read by nothing.
+
+2. Books already have a primary key: `app/db.py` gives the `books` table a
+   SQLite `INTEGER PRIMARY KEY`, assigned on insert. Adding ids to the seed
+   would create a second numbering that means nothing to the database, which we
+   think is worse than having none. The primary-key-conflict risk therefore
+   does not apply as described -- the seed supplies metadata, not keys.
+
+That said, the underlying observation is correct: one book can have several
+editions with different ISBNs, and it does affect us. Our `identity_key` is
+`isbn:<normalised>`, so two editions of one work are two tracked rows. That is
+deliberate -- `CLAUDE.md` states "Allow books with the same title when their
+ISBNs are different" -- and it lets someone track the paperback they own rather
+than an abstract work.
+
+The cost shows up in paged results: `author=J. K. Rowling` returns 421 results,
+many of them editions and translations of the same seven novels. Grouping
+editions under a work would be a genuine improvement, and Open Library exposes
+a work key (`key`, e.g. `/works/OL82563W`) that would support it. We have
+added it as a future-work item in `DESIGN.md` section 7.7 rather than changing
+the seed's data model.
+
 ## Sequencing
 
 1. **Item 2** - finish the browser check, then commit and push. Everything else

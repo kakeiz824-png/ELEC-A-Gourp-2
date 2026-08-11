@@ -419,7 +419,7 @@ function buildCard(book) {
     let subjects = [];
     try {
       const data = await api(`/books/${book.id}/tag-suggestions`);
-      subjects = data.subjects || [];
+      subjects = data.categories || [];
     } catch (_error) {
       subjects = []; // suggestions are best-effort; never block editing
     }
@@ -428,7 +428,7 @@ function buildCard(book) {
     }
     const label = document.createElement("span");
     label.className = "tag-suggestions-label";
-    label.textContent = "Suggested from Open Library";
+    label.textContent = "Suggested categories";
     suggestionsContainer.appendChild(label);
     for (const subject of subjects) {
       const chip = document.createElement("button");

@@ -457,20 +457,28 @@ button.ghost.danger {
 }
 
 .tag-suggestion {
-  padding: 0.2rem 0.55rem;
-  border: 1px dashed #9b8e72;
+  padding: 0.35rem 0.85rem;
+  border: 1px solid #b7a98a;
   border-radius: 999px;
-  background: transparent;
-  color: #5a4d33;
+  background: #fffdf8;
+  color: #3f3626;
   cursor: pointer;
-  font-size: 0.75rem;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    transform 0.1s ease;
 }
 
 .tag-suggestion:hover {
   background: #2b5f8f;
   border-color: #2b5f8f;
   color: #fff;
+  transform: translateY(-1px);
+}
+
+.tag-suggestion:focus-visible {
+  outline: 2px solid #2b5f8f;
+  outline-offset: 2px;
 }
 
 .pagination {

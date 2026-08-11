@@ -116,7 +116,7 @@ def test_tag_suggestions_come_from_open_library(client, mock_openlibrary) -> Non
     resp = client.get(f"/books/{book['id']}/tag-suggestions")
 
     assert resp.status_code == 200
-    assert resp.json()["subjects"] == ["Science fiction", "Aliens"]
+    assert resp.json()["categories"] == ["Sci-Fi & Fantasy"]
 
 
 def test_tag_suggestions_are_empty_when_the_catalogue_is_offline(client) -> None:
@@ -125,7 +125,7 @@ def test_tag_suggestions_are_empty_when_the_catalogue_is_offline(client) -> None
     resp = client.get(f"/books/{book['id']}/tag-suggestions")
 
     assert resp.status_code == 200
-    assert resp.json()["subjects"] == []
+    assert resp.json()["categories"] == []
 
 
 def test_tag_suggestions_for_a_missing_book_return_404(client) -> None:

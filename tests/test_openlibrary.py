@@ -433,3 +433,19 @@ def test_subjects_for_isbn_hides_unavailable_from_callers(mock_openlibrary) -> N
     mock_openlibrary(handler)
 
     assert openlibrary.subjects_for_isbn("9781800249158") == []
+
+def test_suggest_categories_maps_subjects_to_few_broad_buckets() -> None:
+    raw = [
+        "Science fiction",
+        "Fantasy",
+        "Human-alien encounters",
+        "Chinese Science fiction",
+        "Murder mystery",
+        "History of China",
+    ]
+
+    assert openlibrary.suggest_categories(raw) == [
+        "Sci-Fi & Fantasy",
+        "Mystery & Thriller",
+        "Non-fiction",
+    ]

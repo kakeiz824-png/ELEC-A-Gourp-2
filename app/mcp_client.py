@@ -15,7 +15,7 @@ from typing import Any
 
 from fastmcp import Client
 
-from app.details import BookDetails, SearchPage
+from app.details import AuthorDetails, BookDetails, SearchPage
 from mcp_server.server import mcp
 
 
@@ -64,6 +64,43 @@ def _details(tool: str, payload: object) -> BookDetails:
         isbn=isbn,
         year=year,
         cover_url=cover_url,
+    )
+
+
+def _author(tool: str, payload: object) -> AuthorDetails:
+    if not isinstance(payload, dict):
+        raise MCPUnavailable(f"{tool} returned an invalid author record")
+
+    name = payload.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise MCPUnavailable(f"{tool} returned an author without a name")
+
+    bio = payload.get("bio")
+    birth_date = payload.get("birth_date")
+    death_date = payload.get("death_date")
+    work_count = payload.get("work_count")
+    photo_url = payload.get("photo_url")
+
+    for label, value in (
+        ("biography", bio),
+        ("birth date", birth_date),
+        ("death date", death_date),
+        ("photo URL", photo_url),
+    ):
+        if value is not None and not isinstance(value, str):
+            raise MCPUnavailable(f"{tool} returned an invalid {label}")
+    if work_count is not None and (
+        isinstance(work_count, bool) or not isinstance(work_count, int)
+    ):
+        raise MCPUnavailable(f"{tool} returned an invalid work count")
+
+    return AuthorDetails(
+        name=name.strip(),
+        bio=bio,
+        birth_date=birth_date,
+        death_date=death_date,
+        work_count=work_count,
+        photo_url=photo_url,
     )
 
 
@@ -137,3 +174,17 @@ def get_book_details(isbn: str) -> BookDetails | None:
         raise MCPUnavailable(f"{tool} MCP status was {status!r}")
 
     return _details(tool, response.get("book"))
+
+
+def get_author_details(name: str) -> AuthorDetails | None:
+    """Call the local MCP author lookup, or return ``None`` if no author matched."""
+    tool = "get_author_details"
+    response = _respond(tool, {"name": name})
+
+    status = response.get("status")
+    if status == "no_match":
+        return None
+    if status != "ok":
+        raise MCPUnavailable(f"{tool} MCP status was {status!r}")
+
+    return _author(tool, response.get("author"))

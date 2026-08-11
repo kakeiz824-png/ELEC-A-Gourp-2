@@ -148,6 +148,7 @@ cascade-deletes its Review.
 | `DELETE` | `/books/{id}` | Delete a book and its reviews |
 | `GET` | `/books/{id}/reviews` | List reviews for a book |
 | `POST` | `/books/{id}/reviews` | Create or update the personal rating and review |
+| `GET` | `/authors` | Return one author's profile for `?name=`; `found=false` with null fields when none is available |
 | `GET` | `/stats` | Return shelf and rating statistics |
 
 There is no general book-update endpoint and no update/delete endpoint for an

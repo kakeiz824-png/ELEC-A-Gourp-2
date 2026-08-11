@@ -48,6 +48,7 @@ def test_server_registers_both_searches_with_ai_facing_descriptions() -> None:
     described = {tool.name: tool.description for tool in tools}
 
     assert sorted(described) == [
+        "get_author_details",
         "get_book_details",
         "search_book",
         "search_by_author",
@@ -69,6 +70,7 @@ def test_server_starts_over_stdio_like_a_desktop_mcp_client() -> None:
     tools = asyncio.run(list_tools())
 
     assert sorted(tool.name for tool in tools) == [
+        "get_author_details",
         "get_book_details",
         "search_book",
         "search_by_author",

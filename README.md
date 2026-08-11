@@ -33,15 +33,16 @@ Searching an author's name returns the books that author wrote. This needs its o
 
 Shelf Life queries the keyless Open Library API through its local MCP tools (`app/mcp_client.py` to `mcp_server/server.py`), with a direct `app/openlibrary.py` path kept for diagnostics.
 
-The application provides three Open Library functions:
+The application provides these Open Library functions:
 
 - `search_book(title, limit, offset)` pages through title matches.
 - `search_author(author, limit, offset)` pages through the author index for books that author wrote.
 - `get_book_details(isbn)` retrieves details for one ISBN, and is how an addition is confirmed.
+- `get_author_details(name)` retrieves one author's biography, life dates, and work count for the author panel.
 
-Open Library responses are converted into the application's internal `BookDetails` format before reaching the API routes or database.
+Open Library responses are converted into the application's internal `BookDetails`/`AuthorDetails` values before reaching the API routes or database.
 
-The course-required MCP server is implemented in `mcp_server/server.py`, which exposes the same three functions as FastMCP tools (`search_book`, `search_by_author`, `get_book_details`). The FastAPI application calls these tools through `app/mcp_client.py` over FastMCP's in-memory transport, so the app and the MCP tools share one lookup path. External MCP clients can launch the server with `python -m mcp_server.server` (STDIO).
+The course-required MCP server is implemented in `mcp_server/server.py`. It exposes the three required catalogue tools (`search_book`, `search_by_author`, `get_book_details`) plus `get_author_details` for the author profile, all as FastMCP tools. The FastAPI application calls these tools through `app/mcp_client.py` over FastMCP's in-memory transport, so the app and the MCP tools share one lookup path. External MCP clients can launch the server with `python -m mcp_server.server` (STDIO).
 
 ## Technology Stack
 
@@ -187,6 +188,7 @@ No Open Library account or API key is required.
 | `DELETE` | `/books/{id}` | Delete a book and its reviews |
 | `GET` | `/books/{id}/reviews` | List reviews for a book |
 | `POST` | `/books/{id}/reviews` | Add a rating and optional review |
+| `GET` | `/authors` | Return an author's profile (bio, dates, work count) for `?name=`; `found=false` when none is available |
 | `GET` | `/stats` | Return reading and rating statistics |
 
 Example add request:

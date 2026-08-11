@@ -16,6 +16,11 @@ const pagination = document.querySelector("#pagination");
 const prevPageButton = document.querySelector("#prev-page");
 const nextPageButton = document.querySelector("#next-page");
 const pageStatus = document.querySelector("#page-status");
+const authorProfile = document.querySelector("#author-profile");
+const authorPhoto = document.querySelector("#author-photo");
+const authorName = document.querySelector("#author-name");
+const authorMeta = document.querySelector("#author-meta");
+const authorBio = document.querySelector("#author-bio");
 
 const PLACEHOLDERS = {
   title: "e.g. The Hobbit",
@@ -144,6 +149,96 @@ function clearSearchResults() {
   searchResults.hidden = true;
   pagination.hidden = true;
   currentSearch = null;
+  clearAuthorProfile();
+}
+
+/** Hide the author panel and drop whatever it was showing. */
+function clearAuthorProfile() {
+  authorProfile.hidden = true;
+  authorName.textContent = "";
+  authorMeta.textContent = "";
+  authorBio.textContent = "";
+  authorPhoto.hidden = true;
+  authorPhoto.removeAttribute("src");
+}
+
+/** One line of life dates and output, from whatever the catalogue supplied. */
+function describeAuthorLife(profile) {
+  const birth = profile.birth_date ? String(profile.birth_date).trim() : "";
+  const death = profile.death_date ? String(profile.death_date).trim() : "";
+  const parts = [];
+  if (birth && death) {
+    parts.push(`${birth} – ${death}`);
+  } else if (birth) {
+    parts.push(`Born ${birth}`);
+  } else if (death) {
+    parts.push(`Died ${death}`);
+  }
+  if (typeof profile.work_count === "number") {
+    parts.push(`${profile.work_count} work${profile.work_count === 1 ? "" : "s"}`);
+  }
+  return parts.join(" · ");
+}
+
+/** Show the author photo, or hide the image when there is none or it is blank. */
+function setAuthorPhoto(profile) {
+  const url =
+    typeof profile.photo_url === "string" ? profile.photo_url.trim() : "";
+  if (!url) {
+    authorPhoto.hidden = true;
+    authorPhoto.removeAttribute("src");
+    return;
+  }
+  authorPhoto.alt = `Photo of ${profile.name}`;
+  authorPhoto.addEventListener(
+    "load",
+    () => {
+      // Open Library serves a 1x1 blank when an id has no real photo.
+      if (authorPhoto.naturalWidth <= 1 || authorPhoto.naturalHeight <= 1) {
+        authorPhoto.hidden = true;
+      }
+    },
+    { once: true },
+  );
+  authorPhoto.addEventListener(
+    "error",
+    () => {
+      authorPhoto.hidden = true;
+    },
+    { once: true },
+  );
+  authorPhoto.hidden = false;
+  authorPhoto.src = url;
+}
+
+/** Render the author panel, or hide it when no profile was found. */
+function renderAuthorProfile(profile) {
+  if (!profile || !profile.found) {
+    clearAuthorProfile();
+    return;
+  }
+  authorName.textContent = profile.name;
+
+  const meta = describeAuthorLife(profile);
+  authorMeta.textContent = meta;
+  authorMeta.hidden = meta === "";
+
+  authorBio.textContent = profile.bio ? profile.bio : "";
+  authorBio.hidden = !profile.bio;
+
+  setAuthorPhoto(profile);
+  authorProfile.hidden = false;
+}
+
+/** Fetch and show an author's profile. A failure hides the panel, nothing more. */
+async function loadAuthorProfile(name) {
+  try {
+    const profile = await api(`/authors?name=${encodeURIComponent(name)}`);
+    renderAuthorProfile(profile);
+  } catch {
+    // The profile is a bonus; its absence must not disturb the book results.
+    clearAuthorProfile();
+  }
 }
 
 function buildSearchResult(candidate) {
@@ -334,6 +429,11 @@ async function runSearch(mode, query, page) {
     // Trust the page the server reports, not the one that was asked for.
     currentSearch = { mode, query, page: results.page };
     renderSearchResults(results);
+    // Only an author search has a profile, and only the first page loads it;
+    // paging through their books keeps the panel already on screen.
+    if (mode === "author" && page === 1) {
+      loadAuthorProfile(query);
+    }
     setHint(
       results.items.length > 0
         ? "Select the correct book below. Nothing is added to a shelf until you pick one."

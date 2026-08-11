@@ -21,8 +21,10 @@ from typing import Any
 import httpx
 
 from app.details import (
+    AuthorDetails,
     BookDetails,
     SearchPage,
+    author_photo_url_by_id,
     cover_url_by_id,
     cover_url_by_isbn,
     normalise,
@@ -34,10 +36,13 @@ logger = logging.getLogger(__name__)
 
 SEARCH_URL = "https://openlibrary.org/search.json"
 BOOKS_URL = "https://openlibrary.org/api/books"
+AUTHORS_SEARCH_URL = "https://openlibrary.org/search/authors.json"
+AUTHOR_URL = "https://openlibrary.org/authors/{key}.json"
 
 # Asking for named fields keeps the response small: an unfiltered search doc
 # carries hundreds of keys, including every edition ISBN.
 SEARCH_FIELDS = "title,author_name,first_publish_year,isbn,cover_i"
+AUTHOR_SEARCH_FIELDS = "key,name,birth_date,death_date,work_count"
 SEARCH_LIMIT = 5
 
 DEFAULT_TIMEOUT = 5.0
@@ -307,4 +312,95 @@ def get_book_details(isbn: str) -> BookDetails | None:
         isbn=key,
         year=year_from(record.get("publish_date")),
         cover_url=cover_url,
+    )
+
+
+def _text(value: object) -> str | None:
+    """A stripped non-empty string, or ``None`` for anything else."""
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _author_key(doc: object) -> str | None:
+    """The bare OLID (e.g. ``OL23919A``) from a ``search/authors`` doc.
+
+    The author search index returns the bare id, but the same field is a
+    ``/authors/OL…A`` path elsewhere in Open Library, so the trailing segment is
+    taken to accept either shape.
+    """
+    if not isinstance(doc, dict):
+        return None
+    key = _text(doc.get("key"))
+    return key.rsplit("/", 1)[-1] if key else None
+
+
+def _author_bio(value: object) -> str | None:
+    """Pull a biography out of the two shapes Open Library uses.
+
+    An author record carries ``bio`` either as a plain string or as a typed text
+    object ``{"type": "/type/text", "value": "…"}``.
+    """
+    if isinstance(value, str):
+        return _text(value)
+    if isinstance(value, dict):
+        return _text(value.get("value"))
+    return None
+
+
+def _work_count(value: object) -> int | None:
+    """How many works the catalogue credits the author with, if it is a count."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _first_author_photo(photos: object) -> str | None:
+    """The URL of the first usable author photo id, or ``None``."""
+    if not isinstance(photos, list):
+        return None
+    for photo_id in photos:
+        url = author_photo_url_by_id(photo_id)
+        if url:
+            return url
+    return None
+
+
+def get_author_details(name: str) -> AuthorDetails | None:
+    """Fetch an author's profile by name, or ``None`` if none matches.
+
+    Two calls: the author search index resolves a name to the best-matching
+    author record -- its OLID, display name, dates, and work count -- and the
+    author record itself supplies the biography and photo the search index
+    omits.  A name that matches nobody yields ``None``; any network or protocol
+    failure surfaces as ``LookupUnavailable`` so the caller can degrade to "no
+    profile" instead of failing the author search around it.
+    """
+    query = normalise(name)
+    if not query:
+        return None
+
+    docs, _ = _docs(
+        _get_json(
+            AUTHORS_SEARCH_URL,
+            {"q": name.strip(), "limit": 1, "fields": AUTHOR_SEARCH_FIELDS},
+        ),
+        "author profile search",
+    )
+    doc = docs[0] if docs else None
+    if not isinstance(doc, dict):
+        return None
+
+    record: dict = {}
+    key = _author_key(doc)
+    if key:
+        fetched = _get_json(AUTHOR_URL.format(key=key), {})
+        if isinstance(fetched, dict):
+            record = fetched
+
+    return AuthorDetails(
+        name=_text(doc.get("name")) or _text(record.get("name")) or name.strip(),
+        bio=_author_bio(record.get("bio")),
+        birth_date=_text(record.get("birth_date")) or _text(doc.get("birth_date")),
+        death_date=_text(record.get("death_date")) or _text(doc.get("death_date")),
+        work_count=_work_count(doc.get("work_count")),
+        photo_url=_first_author_photo(record.get("photos")),
     )

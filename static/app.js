@@ -287,10 +287,23 @@ function renderSearchResults(results) {
   }`;
   searchResults.hidden = results.items.length === 0;
 
-  pageStatus.textContent = `Page ${results.page} of ${results.pages}`;
+  // The catalogue's page count comes from its match total, which counts every
+  // edition it matched -- far more than the ISBN-bearing, de-duplicated books we
+  // actually show -- so most of those pages are empty. Treat a full page as
+  // "there may be more" and a short page as the end, so the reader is not sent
+  // clicking Next through hundreds of phantom pages.
+  const isFullPage = results.items.length === results.per_page;
+  const hasMore = isFullPage && results.page < results.pages;
+
   prevPageButton.disabled = results.page <= 1;
-  nextPageButton.disabled = results.page >= results.pages;
-  pagination.hidden = results.items.length === 0 || results.pages <= 1;
+  nextPageButton.disabled = !hasMore;
+  pageStatus.textContent = hasMore
+    ? `Page ${results.page}`
+    : results.page > 1
+      ? `Page ${results.page} · No more results`
+      : "";
+  pagination.hidden =
+    results.items.length === 0 || (results.page <= 1 && !hasMore);
 }
 
 /** Build one book card. All user-supplied text goes in via textContent. */

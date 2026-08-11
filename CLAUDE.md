@@ -254,7 +254,7 @@ page. The server exposes `search_book`, `search_by_author`, and `get_book_detail
 | `SHELF_LIFE_DB` | `shelf_life.db` | SQLite database path |
 | `SHELF_LIFE_ORIGINS` | localhost origins | Comma-separated CORS allowlist |
 | `SHELF_LIFE_LOOKUP_BACKEND` | `mcp` | Use `mcp`, diagnostic `openlibrary`, or offline `seed` |
-| `SHELF_LIFE_OPENLIBRARY_TIMEOUT` | `5` | Open Library timeout in seconds |
+| `SHELF_LIFE_OPENLIBRARY_TIMEOUT` | `10` | Open Library timeout in seconds |
 
 Open Library is keyless. Never add or request an API key for the current integration.
 

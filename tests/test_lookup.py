@@ -104,6 +104,42 @@ def test_live_lookup_is_cached_for_a_repeat_query(monkeypatch) -> None:
     assert first.results == second.results
 
 
+def test_a_seed_fallback_from_an_outage_is_not_cached(monkeypatch) -> None:
+    """A transient timeout must not pin the tiny seed answer for the whole TTL.
+
+    The first call times out and the seed answers; the second call must retry
+    the catalogue rather than serve the cached fallback, so a recovered service
+    replaces the misleading seed result immediately.
+    """
+    calls = {"count": 0}
+
+    def flaky(title: str, *, limit: int, offset: int) -> SearchPage:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise LookupUnavailable("timed out")
+        return SearchPage(
+            results=[
+                BookDetails(
+                    title="The Hobbit",
+                    author="J. R. R. Tolkien",
+                    isbn="9780261103344",
+                    year=1937,
+                    cover_url=None,
+                )
+            ],
+            total=1,
+        )
+
+    monkeypatch.setenv("SHELF_LIFE_LOOKUP_BACKEND", "openlibrary")
+    monkeypatch.setattr(lookup_module.openlibrary, "search_book", flaky)
+
+    lookup_module.search_book("The Hobbit")  # times out -> seed fallback
+    second = lookup_module.search_book("The Hobbit")  # must retry the catalogue
+
+    assert calls["count"] == 2  # the fallback was not cached
+    assert any(book.title == "The Hobbit" for book in second.results)
+
+
 def test_fallback_warning_does_not_log_the_user_query(monkeypatch, caplog) -> None:
     """A degraded search must not write the user's query text to logs."""
 

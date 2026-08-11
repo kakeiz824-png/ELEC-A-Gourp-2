@@ -74,13 +74,21 @@ def clear_lookup_cache() -> None:
     _lookup_cache.clear()
 
 
-def _cached_lookup(key: tuple, compute: Callable[[], object]) -> object:
+def _cached_lookup(
+    key: tuple, compute: Callable[[], object], *, cache_none: bool = True
+) -> object:
     """Return a cached live-catalogue answer, computing and storing on a miss.
 
     The key includes the active backend, so tests and demos that switch
     backends never read a result fetched by another backend.  A small TTL stops
     stale metadata lingering, and the cache is bounded so a long session cannot
     grow without limit.
+
+    ``cache_none=False`` skips storing a ``None`` result. An author profile that
+    came back empty is usually a transient timeout on a slow catalogue rather
+    than a settled "no such author", and caching it would make one slow moment
+    stick for the whole TTL; recomputing on the next request is cheap and lets a
+    recovered catalogue answer straight away.
     """
     now = monotonic()
     cached = _lookup_cache.get(key)
@@ -88,6 +96,8 @@ def _cached_lookup(key: tuple, compute: Callable[[], object]) -> object:
         return cached[1]
 
     value = compute()
+    if value is None and not cache_none:
+        return None
     if len(_lookup_cache) >= _MAX_CACHE_ENTRIES:
         _lookup_cache.clear()
     _lookup_cache[key] = (now, value)
@@ -336,7 +346,7 @@ def author_profile(name: str) -> AuthorDetails | None:
             logger.warning("MCP lookup unavailable for author %r; no profile", name)
             return None
 
-    value = _cached_lookup(cache_key, fetch)
+    value = _cached_lookup(cache_key, fetch, cache_none=False)
     assert value is None or isinstance(value, AuthorDetails)
     return value
 

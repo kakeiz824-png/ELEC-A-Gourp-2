@@ -48,6 +48,11 @@ SEARCH_FIELDS = "title,author_name,first_publish_year,isbn,cover_i"
 AUTHOR_SEARCH_FIELDS = "author_key,author_name"
 SEARCH_LIMIT = 5
 
+# Open Library is often slow from a free hosting tier: healthy responses can
+# take several seconds, so a tight 5s budget made real queries time out and
+# fall back to the tiny offline seed. 10s keeps the app responsive while giving
+# live results room to arrive. Override per environment with
+# ``SHELF_LIFE_OPENLIBRARY_TIMEOUT`` when the network is faster or slower.
 DEFAULT_TIMEOUT = 10.0
 TIMEOUT_ENV = "SHELF_LIFE_OPENLIBRARY_TIMEOUT"
 

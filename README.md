@@ -167,7 +167,7 @@ All configuration variables are optional.
 | `SHELF_LIFE_DB` | `shelf_life.db` in the repository root | SQLite database location |
 | `SHELF_LIFE_ORIGINS` | `http://127.0.0.1:8000,http://localhost:8000` | Comma-separated CORS allowlist |
 | `SHELF_LIFE_LOOKUP_BACKEND` | `mcp` | Lookup through the local MCP tools (`mcp`), the direct Open Library client (`openlibrary`, diagnostics), or the offline seed (`seed`) |
-| `SHELF_LIFE_OPENLIBRARY_TIMEOUT` | `5` | Seconds to wait for Open Library before falling back |
+| `SHELF_LIFE_OPENLIBRARY_TIMEOUT` | `10` | Seconds to wait for Open Library before falling back |
 
 No Open Library account or API key is required.
 

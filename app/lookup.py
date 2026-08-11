@@ -203,38 +203,46 @@ def _search(
     of a real result set every page is empty, and answering those with seeded
     books would put The Hobbit on page five of a search for something else. Only
     a reported total of zero means the catalogue truly has nothing.
+
+    Only a genuine live result is cached. A seed fallback -- served when the live
+    backend is unreachable or times out -- is deliberately *not* cached, because
+    it is usually a transient outage: caching the tiny seed answer would pin a
+    misleading result (e.g. a single seeded book for "J. K. Rowling") for the
+    whole TTL even after the catalogue recovers.
     """
     backend = active_backend()
     if backend == SEED_BACKEND:
         return seed(query, limit=limit, offset=offset)
 
     cache_key = (backend, kind, normalise(query), limit, offset)
+    now = monotonic()
+    cached = _lookup_cache.get(cache_key)
+    if cached is not None and now - cached[0] < CACHE_TTL_SECONDS:
+        assert isinstance(cached[1], SearchPage)
+        return cached[1]
 
-    def fetch() -> SearchPage:
-        if backend == OPENLIBRARY_BACKEND:
-            try:
-                page = direct(query, limit=limit, offset=offset)
-            except openlibrary.LookupUnavailable:
-                logger.warning(
-                    "%s lookup unavailable; using the seed", kind
-                )
-                return seed(query, limit=limit, offset=offset)
-        else:
-            try:
-                page = tool(query, limit=limit, offset=offset)
-            except mcp_client.MCPUnavailable:
-                logger.warning(
-                    "%s lookup unavailable; using the seed", kind
-                )
-                return seed(query, limit=limit, offset=offset)
-
-        if page.total == 0:
+    if backend == OPENLIBRARY_BACKEND:
+        try:
+            page = direct(query, limit=limit, offset=offset)
+        except openlibrary.LookupUnavailable:
+            logger.warning("%s lookup unavailable; using the seed", kind)
             return seed(query, limit=limit, offset=offset)
-        return page
+    else:
+        try:
+            page = tool(query, limit=limit, offset=offset)
+        except mcp_client.MCPUnavailable:
+            logger.warning("%s lookup unavailable; using the seed", kind)
+            return seed(query, limit=limit, offset=offset)
 
-    result = _cached_lookup(cache_key, fetch)
-    assert isinstance(result, SearchPage)
-    return result
+    if page.total == 0:
+        # The catalogue genuinely has nothing; the seed may still answer, but
+        # that fallback is not cached either, so a later live hit can replace it.
+        return seed(query, limit=limit, offset=offset)
+
+    if len(_lookup_cache) >= _MAX_CACHE_ENTRIES:
+        _lookup_cache.clear()
+    _lookup_cache[cache_key] = (now, page)
+    return page
 
 
 def search_book(

@@ -23,16 +23,8 @@ from mcp_server import server
 
 
 LE_GUIN_SEARCH = {
-    "numFound": 1,
-    "docs": [
-        {
-            "key": "OL23919A",
-            "name": "Ursula K. Le Guin",
-            "birth_date": "21 October 1929",
-            "death_date": "22 January 2018",
-            "work_count": 257,
-        }
-    ],
+    "numFound": 257,
+    "docs": [{"author_key": ["OL23919A"], "author_name": ["Ursula K. Le Guin"]}],
 }
 
 LE_GUIN_RECORD = {
@@ -40,23 +32,35 @@ LE_GUIN_RECORD = {
     "bio": "American author of speculative fiction.",
     "photos": [6155669],
     "birth_date": "21 October 1929",
+    "death_date": "22 January 2018",
 }
 
 
-def authors_route(search_payload, record_payload=None, *, status_code=200, seen=None):
-    """Answer the author-index request and the author-record request separately.
+def authors_route(
+    search_payload,
+    record_payload=None,
+    *,
+    status_code=200,
+    record_status=200,
+    seen=None,
+):
+    """Answer the resolve request and the author-record request separately.
 
-    ``get_author_details`` makes two calls; a single-payload handler cannot tell
-    them apart, so this routes by path and optionally records the request it saw.
+    ``get_author_details`` makes two calls -- a ``/search.json`` name resolve and
+    a ``/authors/<key>.json`` record fetch -- and a single-payload handler cannot
+    tell them apart, so this routes by path and optionally records the last
+    request it saw.
     """
 
     def handler(request: httpx.Request) -> httpx.Response:
         if seen is not None:
             seen["path"] = request.url.path
             seen.update(request.url.params)
-        if request.url.path == "/search/authors.json":
+        if request.url.path == "/search.json":
             return httpx.Response(status_code, json=search_payload)
-        return httpx.Response(200, json=record_payload if record_payload is not None else {})
+        return httpx.Response(
+            record_status, json=record_payload if record_payload is not None else {}
+        )
 
     return handler
 
@@ -75,17 +79,19 @@ def author_stub(result):
 # --------------------------------------------------------------------------
 
 
-def test_author_profile_asks_the_authors_index_for_named_fields(
+def test_author_profile_resolves_through_the_fast_search_index(
     mock_openlibrary,
 ) -> None:
     seen: dict[str, str] = {}
-    # Empty docs so no record fetch follows and ``seen`` holds the index request.
+    # Empty docs so no record fetch follows and ``seen`` holds the resolve request.
     mock_openlibrary(authors_route({"docs": []}, seen=seen))
 
     openlibrary.get_author_details("  Ursula K. Le Guin  ")
 
-    assert seen["path"] == "/search/authors.json"
-    assert seen["q"] == "Ursula K. Le Guin"
+    # The slow /search/authors.json index is deliberately avoided.
+    assert seen["path"] == "/search.json"
+    assert seen["author"] == "Ursula K. Le Guin"
+    assert "q" not in seen
     assert seen["limit"] == "1"
     assert seen["fields"] == openlibrary.AUTHOR_SEARCH_FIELDS
 
@@ -99,10 +105,43 @@ def test_author_profile_maps_the_record(mock_openlibrary) -> None:
         name="Ursula K. Le Guin",
         bio="American author of speculative fiction.",
         birth_date="21 October 1929",
-        death_date="22 January 2018",  # absent from the record, taken from the index
-        work_count=257,
+        death_date="22 January 2018",
+        work_count=None,
         photo_url="https://covers.openlibrary.org/a/id/6155669-M.jpg",
     )
+
+
+def test_author_profile_fetches_the_record_for_the_resolved_olid(
+    mock_openlibrary,
+) -> None:
+    """The queried author, not an anthology's first-credited editor, is fetched."""
+    seen: dict[str, str] = {}
+    search = {
+        "docs": [
+            {
+                "author_key": ["OL5678A", "OL1234A"],
+                "author_name": ["Ellen Datlow", "Ted Chiang"],
+            }
+        ]
+    }
+    mock_openlibrary(authors_route(search, {"name": "Ted Chiang"}, seen=seen))
+
+    author = openlibrary.get_author_details("Ted Chiang")
+
+    assert author.name == "Ted Chiang"
+    assert seen["path"] == "/authors/OL1234A.json"
+
+
+def test_author_profile_survives_a_failed_record_fetch(mock_openlibrary) -> None:
+    """A slow or failing record fetch drops the bio, not the whole profile."""
+    mock_openlibrary(authors_route(LE_GUIN_SEARCH, record_status=500))
+
+    author = openlibrary.get_author_details("Ursula K. Le Guin")
+
+    assert author is not None
+    assert author.name == "Ursula K. Le Guin"
+    assert author.bio is None
+    assert author.photo_url is None
 
 
 def test_author_profile_reads_a_typed_bio_object(mock_openlibrary) -> None:

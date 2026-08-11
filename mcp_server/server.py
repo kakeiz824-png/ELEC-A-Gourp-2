@@ -284,12 +284,12 @@ def get_book_details(isbn: str) -> ToolResult:
 
 @mcp.tool
 def get_author_details(name: str) -> ToolResult:
-    """Look up one author's biography, life dates, and how many works they wrote.
+    """Look up one author's biography and life dates.
 
-    Use this tool when the user wants to know about a writer -- who they are, when
-    they lived, how much they published -- rather than a list of their books. The
-    name is resolved to the best-matching author in the catalogue. Not every
-    author has a biography or photo on record, so those fields may be absent.
+    Use this tool when the user wants to know about a writer -- who they are and
+    when they lived -- rather than a list of their books. The name is resolved to
+    the best-matching author in the catalogue. Not every author has a biography,
+    dates, or photo on record, so those fields may be absent.
     """
     query = _normalise_query(name)
     if not query:

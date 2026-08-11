@@ -36,13 +36,16 @@ logger = logging.getLogger(__name__)
 
 SEARCH_URL = "https://openlibrary.org/search.json"
 BOOKS_URL = "https://openlibrary.org/api/books"
-AUTHORS_SEARCH_URL = "https://openlibrary.org/search/authors.json"
 AUTHOR_URL = "https://openlibrary.org/authors/{key}.json"
 
 # Asking for named fields keeps the response small: an unfiltered search doc
 # carries hundreds of keys, including every edition ISBN.
 SEARCH_FIELDS = "title,author_name,first_publish_year,isbn,cover_i"
-AUTHOR_SEARCH_FIELDS = "key,name,birth_date,death_date,work_count"
+# The author profile resolves a name to an OLID through the fast book-search
+# index (``author=`` on ``/search.json``) -- the same reliable endpoint the book
+# list already uses -- rather than the slow ``/search/authors.json`` author
+# index, which routinely takes several seconds and times out.
+AUTHOR_SEARCH_FIELDS = "author_key,author_name"
 SEARCH_LIMIT = 5
 
 DEFAULT_TIMEOUT = 5.0
@@ -320,19 +323,6 @@ def _text(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def _author_key(doc: object) -> str | None:
-    """The bare OLID (e.g. ``OL23919A``) from a ``search/authors`` doc.
-
-    The author search index returns the bare id, but the same field is a
-    ``/authors/OL…A`` path elsewhere in Open Library, so the trailing segment is
-    taken to accept either shape.
-    """
-    if not isinstance(doc, dict):
-        return None
-    key = _text(doc.get("key"))
-    return key.rsplit("/", 1)[-1] if key else None
-
-
 def _author_bio(value: object) -> str | None:
     """Pull a biography out of the two shapes Open Library uses.
 
@@ -346,13 +336,6 @@ def _author_bio(value: object) -> str | None:
     return None
 
 
-def _work_count(value: object) -> int | None:
-    """How many works the catalogue credits the author with, if it is a count."""
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        return None
-    return value
-
-
 def _first_author_photo(photos: object) -> str | None:
     """The URL of the first usable author photo id, or ``None``."""
     if not isinstance(photos, list):
@@ -364,15 +347,52 @@ def _first_author_photo(photos: object) -> str | None:
     return None
 
 
+def _author_identity(doc: object, tokens: list[str]) -> tuple[str, str | None] | None:
+    """The queried author's ``(OLID, display name)`` from a book-search doc.
+
+    A ``/search.json`` book doc lists ``author_key`` and ``author_name`` in
+    lockstep. The top hit for an ``author=`` query is normally by that author, so
+    the first pair is the right one -- except on an anthology whose primary
+    author is somebody else, where the queried name sits further down the list.
+    The aligned name carrying every query token is preferred so "Ted Chiang"
+    resolves to Chiang and not the editor credited first.
+    """
+    if not isinstance(doc, dict):
+        return None
+    keys = doc.get("author_key")
+    if not isinstance(keys, list) or not keys:
+        return None
+    names = doc.get("author_name")
+    names = names if isinstance(names, list) else []
+
+    chosen = 0
+    for index, candidate in enumerate(names):
+        if isinstance(candidate, str) and all(
+            token in normalise(candidate) for token in tokens
+        ):
+            chosen = index
+            break
+
+    key = keys[chosen] if chosen < len(keys) else keys[0]
+    if not isinstance(key, str) or not key.strip():
+        return None
+    name = names[chosen] if chosen < len(names) else None
+    display = name.strip() if isinstance(name, str) and name.strip() else None
+    return key.strip().rsplit("/", 1)[-1], display
+
+
 def get_author_details(name: str) -> AuthorDetails | None:
     """Fetch an author's profile by name, or ``None`` if none matches.
 
-    Two calls: the author search index resolves a name to the best-matching
-    author record -- its OLID, display name, dates, and work count -- and the
-    author record itself supplies the biography and photo the search index
-    omits.  A name that matches nobody yields ``None``; any network or protocol
-    failure surfaces as ``LookupUnavailable`` so the caller can degrade to "no
-    profile" instead of failing the author search around it.
+    Resolution goes through the fast book-search index rather than the slow
+    ``/search/authors.json`` author index: an ``author=`` query returns the
+    author's OLID in ``author_key``, from the same endpoint the book list
+    already relies on.  The author record then supplies the biography, dates, and
+    photo, but that second call is best-effort -- if it is slow or fails, the
+    profile still comes back with the name and a hidden bio rather than vanishing
+    entirely.  A name that matches nobody yields ``None``, and a failure to even
+    resolve the name surfaces as ``LookupUnavailable`` for the caller to treat as
+    "no profile".
     """
     query = normalise(name)
     if not query:
@@ -380,27 +400,30 @@ def get_author_details(name: str) -> AuthorDetails | None:
 
     docs, _ = _docs(
         _get_json(
-            AUTHORS_SEARCH_URL,
-            {"q": name.strip(), "limit": 1, "fields": AUTHOR_SEARCH_FIELDS},
+            SEARCH_URL,
+            {"author": name.strip(), "limit": 1, "fields": AUTHOR_SEARCH_FIELDS},
         ),
         "author profile search",
     )
-    doc = docs[0] if docs else None
-    if not isinstance(doc, dict):
+    identity = _author_identity(docs[0], _author_tokens(name)) if docs else None
+    if identity is None:
         return None
+    key, display_name = identity
 
-    record: dict = {}
-    key = _author_key(doc)
-    if key:
-        fetched = _get_json(AUTHOR_URL.format(key=key), {})
-        if isinstance(fetched, dict):
-            record = fetched
+    try:
+        record = _get_json(AUTHOR_URL.format(key=key), {})
+    except LookupUnavailable:
+        # Best-effort: the name is already resolved, so a slow or failing record
+        # fetch drops only the biography, not the whole panel.
+        record = None
+    if not isinstance(record, dict):
+        record = {}
 
     return AuthorDetails(
-        name=_text(doc.get("name")) or _text(record.get("name")) or name.strip(),
+        name=_text(record.get("name")) or display_name or name.strip(),
         bio=_author_bio(record.get("bio")),
-        birth_date=_text(record.get("birth_date")) or _text(doc.get("birth_date")),
-        death_date=_text(record.get("death_date")) or _text(doc.get("death_date")),
-        work_count=_work_count(doc.get("work_count")),
+        birth_date=_text(record.get("birth_date")),
+        death_date=_text(record.get("death_date")),
+        work_count=None,
         photo_url=_first_author_photo(record.get("photos")),
     )

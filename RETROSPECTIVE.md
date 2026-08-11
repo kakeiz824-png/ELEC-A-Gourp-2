@@ -1,8 +1,5 @@
 # Team Retrospective — M3
 
-*Target: approximately 400-600 words. Must be written in your own words; an AI-generated
-retrospective is an academic integrity violation.*
-
 This retrospective covers the M3 milestone of the Shelf Life project: shipping the deployed reading tracker, acting on cross-team review feedback, and preparing the final documentation and demo. It records what we would do differently, what hurt our progress, what we would keep, and the most important lesson we take away.
 
 ## Start

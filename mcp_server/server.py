@@ -267,7 +267,7 @@ def get_book_details(isbn: str) -> ToolResult:
     except LookupUnavailable:
         return _unavailable()
     except Exception:
-        logger.exception("Unexpected failure resolving ISBN %r", key)
+        logger.exception("Unexpected failure resolving the requested ISBN")
         return _unavailable()
 
     if book is None:
@@ -317,7 +317,7 @@ def get_author_details(name: str) -> ToolResult:
             is_error=True,
         )
     except Exception:
-        logger.exception("Unexpected failure resolving author %r", query)
+        logger.exception("Unexpected failure resolving the requested author")
         return ToolResult(
             content=(
                 "Open Library is temporarily unavailable. "

@@ -39,6 +39,39 @@ def call_search_book(title: str) -> str:
     return call_search_result(title).content[0].text
 
 
+def call_get_book_details(isbn: str):
+    """Call the registered ISBN tool and return its complete protocol result."""
+
+    async def call():
+        async with Client(server.mcp) as client:
+            return await client.call_tool(
+                "get_book_details",
+                {"isbn": isbn},
+                raise_on_error=False,
+            )
+
+    return asyncio.run(call())
+
+
+def call_details_text(isbn: str) -> str:
+    """Call the registered ISBN tool and return its readable text content."""
+    return call_get_book_details(isbn).content[0].text
+
+
+def call_get_author_details(name: str):
+    """Call the registered author tool and return its complete protocol result."""
+
+    async def call():
+        async with Client(server.mcp) as client:
+            return await client.call_tool(
+                "get_author_details",
+                {"name": name},
+                raise_on_error=False,
+            )
+
+    return asyncio.run(call())
+
+
 def test_server_registers_both_searches_with_ai_facing_descriptions() -> None:
     async def list_tools():
         async with Client(server.mcp) as client:
@@ -315,3 +348,112 @@ def test_readable_and_structured_outputs_share_one_field_set() -> None:
 
     assert names == set(payload)
     assert len(lines) == len(payload)
+
+
+def test_get_book_details_returns_a_normalized_result(monkeypatch) -> None:
+    details = BookDetails(
+        title="The Hobbit",
+        author="J.R.R. Tolkien",
+        isbn="9780261103344",
+        year=1937,
+        cover_url="https://covers.example/hobbit.jpg",
+    )
+    monkeypatch.setattr(server, "open_library_details", lambda isbn: details)
+
+    text = call_details_text("9780261103344")
+
+    assert text.startswith("Found ISBN 9780261103344:")
+    assert "The Hobbit" in text
+    assert "Author: J.R.R. Tolkien" in text
+    assert "First published: 1937" in text
+    assert "Cover: https://covers.example/hobbit.jpg" in text
+
+    structured = call_get_book_details("9780261103344").structured_content
+    assert structured["status"] == "ok"
+    assert structured["book"] == {
+        "title": "The Hobbit",
+        "author": "J.R.R. Tolkien",
+        "isbn": "9780261103344",
+        "year": 1937,
+        "cover_url": "https://covers.example/hobbit.jpg",
+    }
+
+
+def test_get_book_details_rejects_a_blank_isbn_without_a_lookup(monkeypatch) -> None:
+    def fail_if_called(isbn: str):
+        raise AssertionError("blank input must not call Open Library")
+
+    monkeypatch.setattr(server, "open_library_details", fail_if_called)
+
+    assert call_details_text("   ") == "Error: isbn must not be blank."
+
+
+def test_get_book_details_rejects_an_overlong_isbn_without_a_lookup(monkeypatch) -> None:
+    def fail_if_called(isbn: str):
+        raise AssertionError("overlong input must not call Open Library")
+
+    monkeypatch.setattr(server, "open_library_details", fail_if_called)
+
+    text = call_details_text("x" * (server.MAX_ISBN_LENGTH + 1))
+
+    assert text == "Error: isbn must be 32 characters or fewer."
+
+
+def test_get_book_details_reports_no_match(monkeypatch) -> None:
+    monkeypatch.setattr(server, "open_library_details", lambda isbn: None)
+
+    assert (
+        call_details_text("9780000000000")
+        == 'No book found with ISBN "9780000000000".'
+    )
+
+
+def test_get_book_details_hides_catalogue_failures_from_the_client(monkeypatch) -> None:
+    def unavailable(isbn: str):
+        raise LookupUnavailable("internal network details")
+
+    monkeypatch.setattr(server, "open_library_details", unavailable)
+
+    text = call_details_text("9780261103344")
+
+    assert text == (
+        "Open Library is temporarily unavailable. "
+        "Please try this book search again later."
+    )
+    assert "internal network details" not in text
+
+
+def test_get_book_details_logs_the_exception_but_not_the_isbn(
+    monkeypatch, caplog
+) -> None:
+    """An unexpected bug is logged for diagnostics without echoing the ISBN."""
+
+    def explode(isbn: str):
+        raise RuntimeError("internal mapping bug")
+
+    monkeypatch.setattr(server, "open_library_details", explode)
+    caplog.set_level(logging.ERROR, logger="mcp_server.server")
+
+    result = call_get_book_details("9780261103344")
+
+    assert result.structured_content["status"] == "unavailable"
+    assert "internal mapping bug" in caplog.text
+    assert "9780261103344" not in caplog.text
+
+
+def test_get_author_details_logs_the_exception_but_not_the_name(
+    monkeypatch, caplog
+) -> None:
+    """An unexpected author-profile bug is logged without echoing the name."""
+
+    def explode(name: str):
+        raise RuntimeError("internal mapping bug")
+
+    monkeypatch.setattr(server, "open_library_author_details", explode)
+    caplog.set_level(logging.ERROR, logger="mcp_server.server")
+
+    result = call_get_author_details("Ursula K. Le Guin")
+
+    assert result.structured_content["status"] == "unavailable"
+    assert "internal mapping bug" in caplog.text
+    assert "Ursula K. Le Guin" not in caplog.text

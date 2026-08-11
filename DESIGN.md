@@ -579,13 +579,13 @@ tools through its in-memory MCP client adapter and preserves seed fallback.
 - [x] Add direct HTTP timeouts, failure mapping, seed fallback, and mocked HTTP tests.
 - [x] Define seven Studio 5 MCP tool signatures.
 - [x] Expose and test `search_book` as the first end-to-end FastMCP tool.
-- [ ] Expose `get_book_details` as the second Open Library MCP tool.
+- [x] Expose `get_book_details` as the second Open Library MCP tool.
 - [x] Connect the MCP client through the existing lookup boundary.
 - [x] Add isolated mocked tests for the first MCP tool.
 - [x] Add isolated mocked tests for the first MCP client adapter.
-- [ ] Add isolated mocked tests for the remaining MCP tools.
+- [x] Add isolated mocked tests for the remaining MCP tools.
 - [x] Run the full test suite after the first MCP tool and web integration.
-- [ ] Run Semgrep and review findings.
+- [x] Run Semgrep and review findings.
 
 ### Phase 3 - selected extension and deployment work
 
@@ -647,8 +647,8 @@ browser workflow were also verified manually.
 
 - [x] Validate `search_book` arguments and bound input sizes.
 - [x] Review the STDIO/in-memory MCP transports and error mapping.
-- [ ] Avoid logging sensitive user-provided content unnecessarily.
-- [ ] Run Semgrep and manually review its findings.
+- [x] Avoid logging sensitive user-provided content unnecessarily.
+- [x] Run Semgrep and manually review its findings.
 
 ### Required before social features
 

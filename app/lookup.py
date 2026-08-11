@@ -206,7 +206,7 @@ def _search(
                 page = direct(query, limit=limit, offset=offset)
             except openlibrary.LookupUnavailable:
                 logger.warning(
-                    "Open Library unavailable for %s %r; using the seed", kind, query
+                    "%s lookup unavailable; using the seed", kind
                 )
                 return seed(query, limit=limit, offset=offset)
         else:
@@ -214,7 +214,7 @@ def _search(
                 page = tool(query, limit=limit, offset=offset)
             except mcp_client.MCPUnavailable:
                 logger.warning(
-                    "MCP lookup unavailable for %s %r; using the seed", kind, query
+                    "%s lookup unavailable; using the seed", kind
                 )
                 return seed(query, limit=limit, offset=offset)
 
@@ -291,14 +291,14 @@ def details_for_isbn(isbn: str) -> BookDetails | None:
                 details = openlibrary.get_book_details(isbn)
             except openlibrary.LookupUnavailable:
                 logger.warning(
-                    "Open Library unavailable for ISBN %r; using the seed", isbn
+                    "ISBN lookup unavailable; using the seed"
                 )
                 return _seed_isbn(isbn)
         else:
             try:
                 details = mcp_client.get_book_details(isbn)
             except mcp_client.MCPUnavailable:
-                logger.warning("MCP lookup unavailable for ISBN %r; using the seed", isbn)
+                logger.warning("ISBN lookup unavailable; using the seed")
                 return _seed_isbn(isbn)
         return details or _seed_isbn(isbn)
 
@@ -327,13 +327,13 @@ def author_profile(name: str) -> AuthorDetails | None:
                 return openlibrary.get_author_details(name)
             except openlibrary.LookupUnavailable:
                 logger.warning(
-                    "Open Library unavailable for author %r; no profile", name
+                    "author profile lookup unavailable"
                 )
                 return None
         try:
             return mcp_client.get_author_details(name)
         except mcp_client.MCPUnavailable:
-            logger.warning("MCP lookup unavailable for author %r; no profile", name)
+            logger.warning("author profile lookup unavailable")
             return None
 
     value = _cached_lookup(cache_key, fetch)

@@ -11,6 +11,7 @@ from app.lookup import BookDetails, details_for_isbn, lookup
 from app.models import (
     Book,
     BookCreate,
+    BookTagsUpdate,
     BookWithReviews,
     Review,
     SearchResults,
@@ -32,6 +33,65 @@ def row_to_book(row: sqlite3.Row) -> dict:
     book.pop("identity_key", None)
     book["details_pending"] = bool(book["details_pending"])
     return book
+
+
+MAX_TAGS_PER_BOOK = 20
+MAX_TAG_LENGTH = 50
+
+
+def _tags_for_books(
+    connection: sqlite3.Connection, book_ids: list[int]
+) -> dict[int, list[str]]:
+    """Map book ids to their tag names, sorted case-insensitively."""
+    if not book_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in book_ids)
+    # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- placeholders is only "?, ?, ?"; values bound via parameters. See docs/security-triage.md.
+    rows = connection.execute(
+        f"""
+        SELECT bt.book_id, t.name
+        FROM book_tags bt
+        JOIN tags t ON t.id = bt.tag_id
+        WHERE bt.book_id IN ({placeholders})
+        ORDER BY t.name COLLATE NOCASE
+        """,
+        book_ids,
+    ).fetchall()
+    mapping: dict[int, list[str]] = {book_id: [] for book_id in book_ids}
+    for row in rows:
+        mapping.setdefault(row["book_id"], []).append(row["name"])
+    return mapping
+
+
+def _normalise_tag_names(raw: list[str]) -> list[str]:
+    """Strip, drop blanks, dedupe case-insensitively, and bound the tag set."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for value in raw:
+        if not isinstance(value, str):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Tags must be strings.",
+            )
+        name = value.strip()
+        if not name:
+            continue
+        if len(name) > MAX_TAG_LENGTH:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Tag is too long (max {MAX_TAG_LENGTH} characters).",
+            )
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    if len(names) > MAX_TAGS_PER_BOOK:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Too many tags (max {MAX_TAGS_PER_BOOK}).",
+        )
+    return names
 
 
 def fetch_book(connection: sqlite3.Connection, book_id: int) -> sqlite3.Row:
@@ -81,19 +141,49 @@ def confirm_isbn(isbn: str) -> BookDetails | None:
 @router.get("", response_model=list[Book])
 def list_books(
     shelf: Shelf | None = Query(default=None, description="Filter by shelf"),
+    tag: str | None = Query(default=None, description="Filter by tag name"),
     connection: sqlite3.Connection = Depends(get_db),
 ) -> list[dict]:
-    """List books, newest first, optionally filtered to one shelf."""
-    if shelf is None:
+    """List books, newest first, optionally filtered to one shelf or tag."""
+    if shelf is None and tag is None:
         rows = connection.execute(
             "SELECT * FROM books ORDER BY created_at DESC, id DESC"
         ).fetchall()
-    else:
+    elif tag is None:
         rows = connection.execute(
             "SELECT * FROM books WHERE shelf = ? ORDER BY created_at DESC, id DESC",
             (shelf,),
         ).fetchall()
-    return [row_to_book(row) for row in rows]
+    elif shelf is None:
+        rows = connection.execute(
+            """
+            SELECT b.*
+            FROM books b
+            JOIN book_tags bt ON bt.book_id = b.id
+            JOIN tags t ON t.id = bt.tag_id
+            WHERE t.name = ? COLLATE NOCASE
+            ORDER BY b.created_at DESC, b.id DESC
+            """,
+            (tag,),
+        ).fetchall()
+    else:
+        rows = connection.execute(
+            """
+            SELECT b.*
+            FROM books b
+            JOIN book_tags bt ON bt.book_id = b.id
+            JOIN tags t ON t.id = bt.tag_id
+            WHERE t.name = ? COLLATE NOCASE AND b.shelf = ?
+            ORDER BY b.created_at DESC, b.id DESC
+            """,
+            (tag, shelf),
+        ).fetchall()
+
+    tags = _tags_for_books(connection, [row["id"] for row in rows])
+    books = [row_to_book(row) for row in rows]
+    for book in books:
+        book["tags"] = tags.get(book["id"], [])
+    return books
 
 
 @router.get("/search", response_model=SearchResults)
@@ -198,6 +288,40 @@ def create_book(
     return book
 
 
+@router.put("/{book_id}/tags", response_model=Book)
+def update_book_tags(
+    book_id: int,
+    payload: BookTagsUpdate,
+    connection: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    """Replace a book's tags with the supplied set, cleaning up orphan tags."""
+    fetch_book(connection, book_id)
+    names = _normalise_tag_names(payload.tags)
+
+    connection.execute("DELETE FROM book_tags WHERE book_id = ?", (book_id,))
+    for name in names:
+        row = connection.execute(
+            "SELECT id FROM tags WHERE name = ? COLLATE NOCASE", (name,)
+        ).fetchone()
+        if row is None:
+            cursor = connection.execute("INSERT INTO tags (name) VALUES (?)", (name,))
+            tag_id = cursor.lastrowid
+        else:
+            tag_id = row["id"]
+        connection.execute(
+            "INSERT INTO book_tags (book_id, tag_id) VALUES (?, ?)",
+            (book_id, tag_id),
+        )
+    connection.execute(
+        "DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM book_tags)"
+    )
+    connection.commit()
+
+    book = row_to_book(fetch_book(connection, book_id))
+    book["tags"] = _tags_for_books(connection, [book_id]).get(book_id, [])
+    return book
+
+
 @router.get("/{book_id}", response_model=BookWithReviews)
 def get_book(
     book_id: int,
@@ -210,6 +334,7 @@ def get_book(
         (book_id,),
     ).fetchall()
     book["reviews"] = [Review(**dict(row)) for row in rows]
+    book["tags"] = _tags_for_books(connection, [book_id]).get(book_id, [])
     return book
 
 
@@ -292,4 +417,7 @@ def delete_book(
     """Delete a book; its reviews go with it."""
     fetch_book(connection, book_id)
     connection.execute("DELETE FROM books WHERE id = ?", (book_id,))
+    connection.execute(
+        "DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM book_tags)"
+    )
     connection.commit()

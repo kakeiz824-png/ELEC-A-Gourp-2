@@ -352,6 +352,72 @@ button.ghost.danger {
   font-size: 0.8rem;
 }
 
+.tag-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.tag-chip {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.tag-chip.active {
+  background: #2b5f8f;
+  color: #fff;
+  border-color: transparent;
+}
+
+.book-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.book-tag {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #ece7dd;
+  color: #4a3f2f;
+  font-size: 0.72rem;
+}
+
+.book-tag.draft button {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  margin-left: 4px;
+  font-size: 0.8rem;
+}
+
+.tag-edit {
+  margin: 6px 0;
+}
+
+.tag-input {
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.tag-edit-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
 .pagination {
   display: flex;
   align-items: center;

@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.db import get_db, init_db
 from app.models import Stats
-from app.routers import authors, books, reviews
+from app.routers import authors, books, reviews, tags
 from app.services.stats import collect_stats
 
 
@@ -54,6 +54,7 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 app.include_router(books.router)
 app.include_router(reviews.router)
 app.include_router(authors.router)
+app.include_router(tags.router)
 
 
 @app.get("/", response_class=HTMLResponse)

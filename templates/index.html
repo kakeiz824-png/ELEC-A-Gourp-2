@@ -10,7 +10,7 @@
     <title>{{ app_name }}</title>
     <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}" />
     <script
-      src="{{ url_for('static', path='/app.js') }}?v=20260811-shelf-on-results"
+      src="{{ url_for('static', path='/app.js') }}?v=20260811-tags"
       defer
     ></script>
   </head>
@@ -93,6 +93,8 @@
         <div><strong id="stat-rating">—</strong><span>avg rating</span></div>
       </section>
 
+      <nav class="tag-bar" id="tag-bar" aria-label="Filter by tag"></nav>
+
       <section class="shelves" aria-label="Shelves">
         <section class="shelf" aria-labelledby="shelf-reading-heading">
           <h2 id="shelf-reading-heading">
@@ -126,6 +128,8 @@
       </section>
     </main>
 
+    <datalist id="tag-options"></datalist>
+
     <template id="book-template">
       <li class="book">
         <img class="cover" alt="" />
@@ -145,8 +149,22 @@
               <option value="wishlist">Wishlist</option>
             </select>
             <button type="button" class="ghost review-button">Review</button>
+            <button type="button" class="ghost tags-button">Tags</button>
             <button type="button" class="ghost retry-button" hidden>Retry</button>
             <button type="button" class="ghost danger delete-button">Delete</button>
+          </div>
+          <div class="book-tags" data-tags></div>
+          <div class="tag-edit" hidden>
+            <input
+              type="text"
+              class="tag-input"
+              list="tag-options"
+              maxlength="50"
+              placeholder="Add a tag and press Enter"
+            />
+            <div class="tag-edit-selected"></div>
+            <button type="button" class="ghost tags-save">Save tags</button>
+            <button type="button" class="ghost tags-cancel">Cancel</button>
           </div>
           <form class="review-form" hidden>
             <label class="visually-hidden">Rating</label>

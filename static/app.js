@@ -17,6 +17,8 @@ const pagination = document.querySelector("#pagination");
 const prevPageButton = document.querySelector("#prev-page");
 const nextPageButton = document.querySelector("#next-page");
 const pageStatus = document.querySelector("#page-status");
+const tagBar = document.querySelector("#tag-bar");
+const tagOptions = document.querySelector("#tag-options");
 const authorProfile = document.querySelector("#author-profile");
 const authorPhoto = document.querySelector("#author-photo");
 const authorName = document.querySelector("#author-name");
@@ -65,6 +67,9 @@ function setCoverImage(cover, book) {
 
 /** What is currently on screen, so the page buttons can re-ask for it. */
 let currentSearch = null;
+
+/** The tag the shelves are filtered to, or null for all books. */
+let currentTag = null;
 
 /** Fetch JSON and raise on any non-2xx so callers only handle one failure path. */
 async function api(path, options = {}) {
@@ -379,6 +384,76 @@ function buildCard(book) {
     );
   });
 
+  const tagsContainer = node.querySelector("[data-tags]");
+  renderBookTags(tagsContainer, book.tags || []);
+
+  const tagsButton = node.querySelector(".tags-button");
+  const tagEdit = node.querySelector(".tag-edit");
+  const tagInput = node.querySelector(".tag-input");
+  const tagSelected = node.querySelector(".tag-edit-selected");
+  let draftTags = [...(book.tags || [])];
+
+  function renderDraftTags() {
+    tagSelected.replaceChildren();
+    for (const name of draftTags) {
+      const chip = document.createElement("span");
+      chip.className = "book-tag draft";
+      chip.textContent = name;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.setAttribute("aria-label", `Remove tag ${name}`);
+      remove.textContent = "×";
+      remove.addEventListener("click", () => {
+        draftTags = draftTags.filter((tag) => tag !== name);
+        renderDraftTags();
+      });
+      chip.appendChild(remove);
+      tagSelected.appendChild(chip);
+    }
+  }
+
+  tagsButton.addEventListener("click", () => {
+    if (tagEdit.hidden) {
+      draftTags = [...(book.tags || [])];
+      tagInput.value = "";
+      renderDraftTags();
+      tagEdit.hidden = false;
+      tagInput.focus();
+    } else {
+      tagEdit.hidden = true;
+    }
+  });
+
+  tagInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const name = tagInput.value.trim();
+      if (name && !draftTags.includes(name)) {
+        draftTags.push(name);
+        renderDraftTags();
+      }
+      tagInput.value = "";
+    }
+  });
+
+  node.querySelector(".tags-save").addEventListener("click", () => {
+    cardAction(
+      async () => {
+        await api(`/books/${book.id}/tags`, {
+          method: "PUT",
+          body: JSON.stringify({ tags: draftTags }),
+        });
+        tagEdit.hidden = true;
+        setHint("Tags saved.");
+      },
+      "Could not save tags.",
+    );
+  });
+
+  node.querySelector(".tags-cancel").addEventListener("click", () => {
+    tagEdit.hidden = true;
+  });
+
   const reviewForm = node.querySelector(".review-form");
   const reviewButton = node.querySelector(".review-button");
   const currentReview = book.reviews?.[0];
@@ -414,6 +489,52 @@ function buildCard(book) {
   return node;
 }
 
+function renderBookTags(container, tags) {
+  container.replaceChildren();
+  for (const name of tags) {
+    const chip = document.createElement("span");
+    chip.className = "book-tag";
+    chip.textContent = name;
+    container.appendChild(chip);
+  }
+  container.hidden = tags.length === 0;
+}
+
+function populateTagOptions(tags) {
+  tagOptions.replaceChildren();
+  for (const tag of tags) {
+    const option = document.createElement("option");
+    option.value = tag.name;
+    tagOptions.appendChild(option);
+  }
+}
+
+function renderTagBar(tags) {
+  tagBar.replaceChildren();
+
+  const all = document.createElement("button");
+  all.type = "button";
+  all.className = "tag-chip" + (currentTag === null ? " active" : "");
+  all.textContent = "All";
+  all.addEventListener("click", () => {
+    currentTag = null;
+    refresh();
+  });
+  tagBar.appendChild(all);
+
+  for (const tag of tags) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "tag-chip" + (currentTag === tag.name ? " active" : "");
+    chip.textContent = `${tag.name} (${tag.count})`;
+    chip.addEventListener("click", () => {
+      currentTag = currentTag === tag.name ? null : tag.name;
+      refresh();
+    });
+    tagBar.appendChild(chip);
+  }
+}
+
 function renderStats(stats) {
   document.querySelector("#stat-total").textContent = stats.total;
   document.querySelector("#stat-reading").textContent = stats.by_shelf.reading;
@@ -425,7 +546,13 @@ function renderStats(stats) {
 
 /** Reload every shelf and the statistics bar from the API. */
 async function refresh() {
-  const [books, stats] = await Promise.all([api("/books"), api("/stats")]);
+  const [books, stats, tags] = await Promise.all([
+    api(currentTag ? `/books?tag=${encodeURIComponent(currentTag)}` : "/books"),
+    api("/stats"),
+    api("/tags"),
+  ]);
+  renderTagBar(tags);
+  populateTagOptions(tags);
 
   // A book card shows its average rating, which only /books/{id} returns.
   const detailed = await Promise.all(books.map((book) => api(`/books/${book.id}`)));

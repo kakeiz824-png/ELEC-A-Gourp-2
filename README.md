@@ -38,7 +38,7 @@ The application provides these Open Library functions:
 - `search_book(title, limit, offset)` pages through title matches.
 - `search_author(author, limit, offset)` pages through the author index for books that author wrote.
 - `get_book_details(isbn)` retrieves details for one ISBN, and is how an addition is confirmed.
-- `get_author_details(name)` retrieves one author's biography, life dates, and work count for the author panel.
+- `get_author_details(name)` retrieves one author's biography and life dates for the author panel, resolving the name through the fast book-search index.
 
 Open Library responses are converted into the application's internal `BookDetails`/`AuthorDetails` values before reaching the API routes or database.
 

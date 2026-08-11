@@ -1,28 +1,53 @@
-# Team Reflection — M3
+# Team Reflection — M3 Milestone
 
+This reflection covers the M3 milestone of the Shelf Life project. We relied heavily on AI tools (Codex, ChatGPT, and Claude Code) for implementation, testing, documentation, and addressing cross‑team review feedback. All interactions are recorded in our AI usage log. The sections below assess where AI truly helped, where it fell short, what caught us off guard, and how we would adjust our approach in the future.
 
-This reflection covers the M3 milestone of the Shelf Life project. We used Codex, ChatGPT, and Claude Code heavily for implementation, testing, documentation, and review-feedback remediation, and those interactions are logged in the AI usage log. The sections below describe where the AI genuinely helped, where it struggled, what surprised us, and what we would change about our approach.
+---
 
 ## What AI did well
-AI did well at implementing author search and paging. The Title/Author selector and paged results let users search for an author like J. K. Rowling and page through all 431 matches, and a book from any page can be added. Doing this from scratch would have taken us much longer.
-AI also did well on the final cover fix. After the first attempt failed, it helped us find the root cause -- Open Library returns 1x1 transparent images for missing covers -- and implement the fallback that detects those images and shows the NO COVER placeholder, together with a regression test. The fix passed both the browser check and the test suite. AI also saved us a lot of time with documentation: it updated the README, organized the AI usage log, and wrote the MCP connection notes, all cross-checked against the actual code and tests.
-AI was also very effective at processing review feedback. For the five findings we received, it analysed each one, wrote a failing test first, and then implemented the fix, which kept the suite at 173 passing tests without regressions. It also organised the whole response in REVIEW-RESPONSE.md so nothing was missed.
+
+AI excelled at processing and acting on review feedback. We received five findings from the cross‑team review; for each one, the AI analysed the issue, wrote a failing test first, and then implemented a fix that satisfied the test. This kept our test suite at 173 passing tests with no regressions. The AI also organised our entire response in `REVIEW-RESPONSE.md`, structuring it so that every finding was addressed explicitly and nothing slipped through the cracks.
+
+Beyond review remediation, AI was also effective at implementing feature enhancements. The author‑search and paging functionality, for example, was built with AI assistance. Users can now search for an author like J. K. Rowling, page through all 431 matches, and add any book from any page. Doing this from scratch would have taken us substantially longer. The same held for the final cover fix: after our first attempt failed, AI helped us trace the root cause (Open Library returns 1×1 transparent images for missing covers) and implement a fallback that detects those images and shows a “NO COVER” placeholder, together with a regression test. The fix passed both browser validation and the full test suite.
+
+AI also saved us significant time on documentation. It updated the README, maintained the AI usage log, and wrote MCP connection notes — all cross‑checked against actual code and tests. This allowed us to focus more on core development while keeping our documentation consistently up‑to‑date.
+
+---
 
 ## Where AI struggled
-AI struggled with the cover fix at first: the first version looked correct, but blank covers still appeared because Open Library returns 1x1 transparent images instead of an error. We only found this by testing manually, and the fix had to be redone. AI also produced MCP tools that leaked internal exception text to AI clients (Item 4 in our review response); a human code review caught this and we fixed it.
-AI also struggled when we asked it to infer whether a search was a title or an author. It tried that twice and both times failed -- for example, "Dune" is both a novel and a real author's surname, and "Harry Potter" is both a series and a legal historian's name -- so we changed the design and let the user choose explicitly with a Title/Author selector (recorded in DESIGN.md section 7.6). AI could not help with deployment or environment problems either: the Render deploy was blocked by account permissions, and no amount of AI assistance could replace having the right teammate with access available.
-AI could also write confident but wrong facts: test counts, pull request numbers, and documentation descriptions sometimes had to be corrected by hand after checking them one by one.
+
+AI’s struggles were equally instructive. The first cover‑fix attempt looked plausible and even passed initial inspection, but blank covers still appeared in practice because the AI did not anticipate the 1×1 transparent‑image case. Only manual testing uncovered this, forcing a redo. Similarly, when we asked the AI to infer whether a search query was a title or an author, it tried twice and failed both times. For example, “Dune” is both a famous novel and a real author’s surname; “Harry Potter” is both a series title and the name of a legal historian. These ambiguities made automatic inference unreliable, so we changed the design to let users explicitly choose between title and author search (recorded in `DESIGN.md` section 7.6). AI could not reason through these real‑world ambiguities.
+
+Another weakness was in tooling: AI produced MCP tools that leaked internal exception text to AI clients (Item 4 in our review response). A human code review caught this and corrected it. AI also struggled with deployment and environment issues — the Render deployment was blocked by account permissions, and no amount of AI advice could replace having the right teammate with access available.
+
+Moreover, AI occasionally produced confidently wrong statements: test counts, pull‑request numbers, and even some documentation descriptions had to be corrected manually after we verified them one by one. The AI’s confidence often outran its accuracy.
+
+---
 
 ## What surprised you
-What surprised us most was how confidently AI can produce wrong results. The first cover fix and the Artifact B test suite both looked completely normal and were delivered with confidence, but were actually broken -- we only noticed by testing. We did not expect that.
-Another surprise was how much better AI output became once we gave it proper project context. After we maintained CLAUDE.md and DESIGN.md, the AI's suggestions were noticeably more accurate and we went down far fewer wrong paths.
-We were also surprised by how fast AI could deliver a complete feature. Author search, paging, and their tests were done in a few days, which would have taken us much longer by hand.
+
+The biggest surprise was the sheer confidence with which AI delivers incorrect results. The first cover fix and the test suite from Artifact B both looked entirely normal and were presented with full assurance, yet both were broken — we only noticed by actually running the tests and manually exercising the features. We did not expect such polished‑looking output to be so fundamentally flawed.
+
+Another positive surprise was how dramatically AI output improved once we provided proper project context. After we maintained `CLAUDE.md` and `DESIGN.md` with accurate, up‑to‑date information, the AI’s suggestions became noticeably more relevant, and we wasted far less time correcting misunderstandings.
+
+We were also surprised by how quickly AI could deliver a complete feature. Author search, paging, and their associated tests were completed in just a few days — a task that would have taken us much longer by hand. The speed was impressive, but it also reinforced the need for careful verification.
+
+---
 
 ## What you would do differently
-If we started over, we would maintain CLAUDE.md and DESIGN.md from day one and keep them up to date, so AI tools understand the project from the start. A lot of the time we spent explaining context and correcting misunderstandings could have been avoided.
-Every AI output should go through a verification checklist before we accept it: run the tests, read the diff, and exercise the feature manually, instead of trusting the result. We would also schedule the documents that must be written by the team (the retrospective, the reflection, and the AI usage log) much earlier, so we were not reconstructing them from memory right before the deadline.
-We would start with test-first development and small commits from the beginning, testing as we went instead of piling up features and testing them all at the end. And we would deploy earlier and assign account permissions at the start, so critical steps did not depend on one person being available at the last minute.
+
+If we started over, we would maintain project‑context files (`CLAUDE.md`, `DESIGN.md`) from day one and keep them continuously updated. Much of the time we spent explaining context and re‑explaining the project structure could have been avoided if AI tools had that information from the start.
+
+Every piece of AI output should go through a mandatory verification checklist before acceptance: run the tests, read the diff carefully, and manually exercise the feature in the browser. We should never trust a result just because it looks plausible.
+
+We would also schedule the documents that must be written by the team (the retrospective, this reflection, and the AI usage log) much earlier in the timeline. Instead of reconstructing them from memory right before the deadline, we would write them incrementally as the project progressed, capturing insights while they were fresh.
+
+Test‑first development and small commits should be adopted from the very beginning. We would test each module as we built it, rather than piling up features and testing everything at the end. This would catch issues earlier and reduce the cost of fixes.
+
+Finally, we would deploy earlier and assign account permissions at project kick‑off, so that critical deployment steps do not depend on a single person being available at the last minute. This would eliminate the blocking delays we experienced.
+
+---
 
 ## Overall
 
-Overall, AI-augmented development gave us a large speed advantage, but it worked only because we planned first, verified every output, and kept the human responsibility for quality. The combination of small steps, tests, and honest documentation is what we will carry into our next project.
+Overall, AI‑augmented development gave us a significant speed advantage, but it worked only because we combined it with disciplined practices: planning first, verifying every output, and maintaining human responsibility for quality. The habits we built — small steps, continuous testing, honest documentation, and early verification — are what we will carry forward. AI is a powerful accelerator, but it is not a substitute for human judgment. When used with care, it helps us move faster; when trusted blindly, it leads us astray. This balance is the most valuable lesson of this milestone.

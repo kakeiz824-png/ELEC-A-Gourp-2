@@ -42,6 +42,57 @@ def json_route(payload, status_code: int = 200):
     return handler
 
 
+def test_search_retries_broad_query_when_title_index_call_fails(
+    mock_openlibrary,
+) -> None:
+    """A slow or failed title-index request still gets the broad-query answer."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "title=" in str(request.url):
+            raise httpx.ConnectError("title index timeout")
+        return httpx.Response(200, json=SEARCH_DOC)
+
+    mock_openlibrary(handler)
+
+    results = openlibrary.search_book("The Hobbit").results
+
+    assert len(results) == 2
+    assert results[0].title == "The Hobbit"
+
+
+def test_get_book_details_falls_back_to_isbn_search_when_books_api_fails(
+    mock_openlibrary,
+) -> None:
+    """A failed books-API call still resolves the ISBN via the search index."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/api/books" in str(request.url):
+            raise httpx.ConnectError("books API timeout")
+        return httpx.Response(
+            200,
+            json={
+                "numFound": 1,
+                "docs": [
+                    {
+                        "title": "The Hobbit",
+                        "author_name": ["J.R.R. Tolkien"],
+                        "first_publish_year": 1937,
+                        "isbn": ["9780261103344"],
+                        "cover_i": 14627509,
+                    }
+                ],
+            },
+        )
+
+    mock_openlibrary(handler)
+
+    details = openlibrary.get_book_details("9780261103344")
+
+    assert details is not None
+    assert details.title == "The Hobbit"
+    assert details.isbn == "9780261103344"
+
+
 def test_search_book_maps_a_real_search_response(mock_openlibrary) -> None:
     mock_openlibrary(json_route(SEARCH_DOC))
 

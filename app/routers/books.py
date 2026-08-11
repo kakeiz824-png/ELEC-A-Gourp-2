@@ -172,7 +172,7 @@ def create_book(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "code": "isbn_not_found",
-                "message": "没有找到带 ISBN 的书籍，请检查书名或稍后重试。",
+                "message": "No book with an ISBN was found. Check the title or try again later.",
             },
         )
     result = save_book(
@@ -183,15 +183,15 @@ def create_book(
     book = row_to_book(result.row)
     if not result.created:
         shelf_name = {
-            "reading": "阅读中",
-            "finished": "已读完",
-            "wishlist": "愿望清单",
+            "reading": "Reading",
+            "finished": "Finished",
+            "wishlist": "Wishlist",
         }[book["shelf"]]
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "code": "book_exists",
-                "message": f"这本书已经存在于“{shelf_name}”书架。",
+                "message": f"This book is already on your {shelf_name} shelf.",
                 "book": book,
             },
         )
@@ -241,7 +241,7 @@ def enrich_book(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "code": "isbn_not_found",
-                "message": "没有找到带 ISBN 的书籍，请检查书名或稍后重试。",
+                "message": "No book with an ISBN was found. Check the title or try again later.",
             },
         )
 
@@ -277,7 +277,7 @@ def enrich_book(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "code": "book_exists",
-                "message": "这本书已经存在于你的书库。",
+                "message": "This book is already in your library.",
                 "book": row_to_book(existing),
             },
         )

@@ -140,7 +140,7 @@ def test_the_same_catalogue_book_is_not_added_to_two_shelves(client) -> None:
     assert duplicate.status_code == 409
     assert duplicate.json()["detail"]["code"] == "book_exists"
     assert duplicate.json()["detail"]["message"] == (
-        "这本书已经存在于“阅读中”书架。"
+        "This book is already on your Reading shelf."
     )
     assert duplicate.json()["detail"]["book"]["id"] == first.json()["id"]
     assert duplicate.json()["detail"]["book"]["shelf"] == "reading"

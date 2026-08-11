@@ -335,6 +335,23 @@ button.ghost.danger {
   line-height: 1.4;
 }
 
+.search-result-actions {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.search-result-shelf {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
 .pagination {
   display: flex;
   align-items: center;

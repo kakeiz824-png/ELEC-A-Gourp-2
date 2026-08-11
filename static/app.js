@@ -5,7 +5,7 @@ const hint = document.querySelector("#add-hint");
 const addForm = document.querySelector("#add-form");
 const addButton = document.querySelector("#add-button");
 const titleInput = document.querySelector("#title-input");
-const shelfSelect = document.querySelector("#shelf-select");
+
 const template = document.querySelector("#book-template");
 const searchMode = document.querySelector("#search-mode");
 const searchResults = document.querySelector("#search-results");
@@ -255,14 +255,15 @@ function buildSearchResult(candidate) {
   const chooseButton = node.querySelector(".choose-book-button");
   chooseButton.addEventListener("click", async () => {
     chooseButton.disabled = true;
-    setHint(`Adding "${candidate.title}"...`, "working");
+    const shelf = node.querySelector(".search-result-shelf").value;
+    setHint(`Adding "${candidate.title}" to ${shelf}...`, "working");
     try {
       await api("/books", {
         method: "POST",
         body: JSON.stringify({
           title: candidate.title,
           isbn: candidate.isbn,
-          shelf: shelfSelect.value,
+          shelf,
         }),
       });
       titleInput.value = "";

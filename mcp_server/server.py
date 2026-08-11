@@ -20,8 +20,9 @@ from collections.abc import Callable
 from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
-from app.details import BookDetails, SearchPage
+from app.details import AuthorDetails, BookDetails, SearchPage
 from app.openlibrary import LookupUnavailable
+from app.openlibrary import get_author_details as open_library_author_details
 from app.openlibrary import get_book_details as open_library_details
 from app.openlibrary import search_author as search_open_library_author
 from app.openlibrary import search_book as search_open_library
@@ -41,7 +42,8 @@ mcp = FastMCP(
         "Search the public Open Library catalogue for books. "
         "Use search_book when a user knows a full or partial book title, "
         "search_by_author when a user names a writer and wants the books that "
-        "writer wrote, and get_book_details to resolve one ISBN."
+        "writer wrote, get_book_details to resolve one ISBN, and "
+        "get_author_details to fetch a writer's biography and dates."
     ),
 )
 
@@ -74,6 +76,32 @@ def _format_book(position: int, book: BookDetails) -> str:
 def _book_payload(book: BookDetails) -> dict[str, str | int | None]:
     """Return the stable data shape consumed by application-side MCP clients."""
     return {name: getattr(book, name) for name, _ in _BOOK_FIELDS}
+
+
+_AUTHOR_FIELDS: tuple[tuple[str, str], ...] = (
+    ("name", "Name"),
+    ("birth_date", "Born"),
+    ("death_date", "Died"),
+    ("work_count", "Works"),
+    ("bio", "Biography"),
+    ("photo_url", "Photo"),
+)
+
+
+def _format_author(author: AuthorDetails) -> str:
+    """Format one normalized author profile for an AI client."""
+    lines = [author.name]
+    lines.extend(
+        f"   {label}: {_show(getattr(author, name))}"
+        for name, label in _AUTHOR_FIELDS
+        if name != "name"
+    )
+    return "\n".join(lines)
+
+
+def _author_payload(author: AuthorDetails) -> dict[str, str | int | None]:
+    """Return the stable author data shape consumed by MCP clients."""
+    return {name: getattr(author, name) for name, _ in _AUTHOR_FIELDS}
 
 
 def _invalid(message: str) -> ToolResult:
@@ -251,6 +279,63 @@ def get_book_details(isbn: str) -> ToolResult:
     return ToolResult(
         content=f"Found ISBN {key}:\n\n{_format_book(1, book)}",
         structured_content={"status": "ok", "book": _book_payload(book)},
+    )
+
+
+@mcp.tool
+def get_author_details(name: str) -> ToolResult:
+    """Look up one author's biography, life dates, and how many works they wrote.
+
+    Use this tool when the user wants to know about a writer -- who they are, when
+    they lived, how much they published -- rather than a list of their books. The
+    name is resolved to the best-matching author in the catalogue. Not every
+    author has a biography or photo on record, so those fields may be absent.
+    """
+    query = _normalise_query(name)
+    if not query:
+        return ToolResult(
+            content="Error: name must not be blank.",
+            structured_content={"status": "invalid_input", "author": None},
+            is_error=True,
+        )
+    if len(query) > MAX_AUTHOR_LENGTH:
+        return ToolResult(
+            content=f"Error: name must be {MAX_AUTHOR_LENGTH} characters or fewer.",
+            structured_content={"status": "invalid_input", "author": None},
+            is_error=True,
+        )
+
+    try:
+        author = open_library_author_details(query)
+    except LookupUnavailable:
+        return ToolResult(
+            content=(
+                "Open Library is temporarily unavailable. "
+                "Please try this author lookup again later."
+            ),
+            structured_content={"status": "unavailable", "author": None},
+            is_error=True,
+        )
+    except Exception:
+        logger.exception("Unexpected failure resolving author %r", query)
+        return ToolResult(
+            content=(
+                "Open Library is temporarily unavailable. "
+                "Please try this author lookup again later."
+            ),
+            structured_content={"status": "unavailable", "author": None},
+            is_error=True,
+        )
+
+    if author is None:
+        return ToolResult(
+            content=f'No author found matching "{query}".',
+            structured_content={"status": "no_match", "author": None},
+        )
+
+    return ToolResult(
+        content=f"Found author:\n\n{_format_author(author)}",
+        structured_content={"status": "ok", "author": _author_payload(author)},
     )
 
 

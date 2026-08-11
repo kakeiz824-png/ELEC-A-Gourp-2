@@ -29,6 +29,7 @@ from time import monotonic
 
 from app import mcp_client, openlibrary
 from app.details import (
+    AuthorDetails,
     BookDetails,
     SearchPage,
     cover_url_by_isbn,
@@ -38,8 +39,10 @@ from app.details import (
 
 
 __all__ = [
+    "AuthorDetails",
     "BookDetails",
     "SearchPage",
+    "author_profile",
     "details_for_isbn",
     "lookup",
     "normalise",
@@ -301,6 +304,40 @@ def details_for_isbn(isbn: str) -> BookDetails | None:
 
     value = _cached_lookup(cache_key, fetch)
     assert value is None or isinstance(value, BookDetails)
+    return value
+
+
+def author_profile(name: str) -> AuthorDetails | None:
+    """The catalogue's profile for an author, or ``None`` when there is none.
+
+    This backs the author page's biography panel. It is best-effort: the seed
+    carries no biographies, so the seed backend and every live-backend outage
+    answer ``None``, and the author's books still list around a missing profile
+    rather than the whole search failing.
+    """
+    backend = active_backend()
+    if backend == SEED_BACKEND:
+        return None
+
+    cache_key = (backend, "author_profile", normalise(name))
+
+    def fetch() -> AuthorDetails | None:
+        if backend == OPENLIBRARY_BACKEND:
+            try:
+                return openlibrary.get_author_details(name)
+            except openlibrary.LookupUnavailable:
+                logger.warning(
+                    "Open Library unavailable for author %r; no profile", name
+                )
+                return None
+        try:
+            return mcp_client.get_author_details(name)
+        except mcp_client.MCPUnavailable:
+            logger.warning("MCP lookup unavailable for author %r; no profile", name)
+            return None
+
+    value = _cached_lookup(cache_key, fetch)
+    assert value is None or isinstance(value, AuthorDetails)
     return value
 
 

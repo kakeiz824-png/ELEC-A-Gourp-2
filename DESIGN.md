@@ -344,6 +344,7 @@ submission updates the existing Review. A Review belongs to exactly one Book.
 | `DELETE` | `/books/{id}` | Delete a book and its reviews |
 | `GET` | `/books/{id}/reviews` | List reviews for a book |
 | `POST` | `/books/{id}/reviews` | Create or update the personal rating and review |
+| `GET` | `/authors` | Return one author's profile for `?name=`; `found=false` with null fields when none is available |
 | `GET` | `/stats` | Return counts and average rating |
 
 M1 does not provide a general `PATCH /books/{id}` endpoint or separate update/delete
@@ -438,6 +439,7 @@ exist.
 | `search_book` | The user gives a full or partial title and wants likely matches. | `title: str`, `limit: int = 5`, `offset: int = 0` | One page of normalized Open Library matches, and the total match count. |
 | `search_by_author` | The user names a writer rather than a book and wants the books that writer wrote. | `author: str`, `limit: int = 5`, `offset: int = 0` | One page of normalized Open Library matches, and the total match count. |
 | `get_book_details` | The user provides an ISBN, or has selected one search result and wants that edition's details. | `isbn: str` | Title, author, year, ISBN, and cover for that one book. |
+| `get_author_details` | The user wants to know about a writer -- biography and life dates -- rather than a list of their books. | `name: str` | Name, biography, birth/death dates, work count, and photo when the catalogue has them. |
 | `list_shelf` | The user asks what is currently on one personal shelf. | `shelf: str` | Books on Reading, Finished, Wishlist, or all shelves. |
 | `get_reading_stats` | The user asks for totals, progress, reviews, or average rating. | none | Current shelf counts, review count, and average rating. |
 | `add_book` | The user explicitly asks to save a title to their tracker. | `title: str`, `shelf: str = "reading"` | The stored book and selected shelf. |

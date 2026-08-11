@@ -84,6 +84,23 @@ class SearchResults(BaseModel):
     total: int
 
 
+class AuthorProfile(BaseModel):
+    """An author's biography panel, best-effort from the catalogue.
+
+    ``found`` says whether a profile was located: when it is false every other
+    field is null and the browser simply hides the panel, so a writer the
+    catalogue has no record of is not an error.
+    """
+
+    name: str
+    bio: str | None = None
+    birth_date: str | None = None
+    death_date: str | None = None
+    work_count: int | None = None
+    photo_url: str | None = None
+    found: bool = False
+
+
 class BookWithReviews(Book):
     reviews: list[Review] = []
 

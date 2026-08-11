@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 COVER_URL_BY_ISBN = "https://covers.openlibrary.org/b/isbn/{isbn}-M.jpg"
 COVER_URL_BY_ID = "https://covers.openlibrary.org/b/id/{cover_id}-M.jpg"
+AUTHOR_PHOTO_URL_BY_ID = "https://covers.openlibrary.org/a/id/{photo_id}-M.jpg"
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,23 @@ class BookDetails:
     isbn: str | None = None
     year: int | None = None
     cover_url: str | None = None
+
+
+@dataclass(frozen=True)
+class AuthorDetails:
+    """One author profile, whichever backend produced it.
+
+    Only ``name`` is guaranteed.  Open Library often has no biography, no dates,
+    and no photo for an author, so every other field is optional and says so
+    rather than inventing a placeholder -- exactly like ``BookDetails``.
+    """
+
+    name: str
+    bio: str | None = None
+    birth_date: str | None = None
+    death_date: str | None = None
+    work_count: int | None = None
+    photo_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +94,18 @@ def cover_url_by_id(cover_id: object) -> str | None:
     if isinstance(cover_id, bool) or not isinstance(cover_id, int):
         return None
     return COVER_URL_BY_ID.format(cover_id=cover_id)
+
+
+def author_photo_url_by_id(photo_id: object) -> str | None:
+    """Photo for an Open Library author id, or ``None`` when there is none.
+
+    Author photo ids are positive integers; Open Library uses ``-1`` (and other
+    non-positive values) to mean "no photo", so those map to ``None`` rather than
+    to a URL that would resolve to a blank image.
+    """
+    if isinstance(photo_id, bool) or not isinstance(photo_id, int) or photo_id <= 0:
+        return None
+    return AUTHOR_PHOTO_URL_BY_ID.format(photo_id=photo_id)
 
 
 def year_from(value: object) -> int | None:

@@ -290,6 +290,16 @@ button.ghost.danger {
   list-style: none;
 }
 
+.search-empty {
+  margin: 0;
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  color: var(--accent-dark);
+  background: var(--surface);
+  line-height: 1.5;
+}
+
 .search-result {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);

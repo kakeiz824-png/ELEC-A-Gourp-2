@@ -180,18 +180,25 @@ def search_book(
     if not query:
         return SearchPage(results=[], total=0)
 
-    docs, total = _docs(
-        _get_json(
-            SEARCH_URL,
-            {
-                "title": title.strip(),
-                "limit": limit,
-                "offset": offset,
-                "fields": SEARCH_FIELDS,
-            },
-        ),
-        "search",
-    )
+    try:
+        docs, total = _docs(
+            _get_json(
+                SEARCH_URL,
+                {
+                    "title": title.strip(),
+                    "limit": limit,
+                    "offset": offset,
+                    "fields": SEARCH_FIELDS,
+                },
+            ),
+            "search",
+        )
+    except LookupUnavailable:
+        # A slow or failed title-index request must not blank the whole
+        # search: the broad query hits a different index path and may still
+        # answer, so fall through to it instead of giving up.
+        docs, total = [], 0
+
     if total == 0:
         # The title index knows nothing about this string, so try the broad
         # query, which also reads subjects and descriptions.  This is decided
@@ -282,15 +289,44 @@ def search_author(
     return _details_page(docs, total)
 
 
+def _isbn_search_details(key: str) -> BookDetails | None:
+    """Resolve one ISBN through the search index instead of the books API."""
+    payload = _get_json(
+        SEARCH_URL,
+        {"q": f"isbn:{key}", "limit": 1, "fields": SEARCH_FIELDS},
+    )
+    docs, _ = _docs(payload, "isbn search")
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        isbns = doc.get("isbn")
+        if not isinstance(isbns, list):
+            continue
+        if any(
+            str(value).strip().replace("-", "").replace(" ", "") == key
+            for value in isbns
+        ):
+            details = _doc_to_details(doc)
+            if details is not None:
+                return details
+    return None
+
+
 def get_book_details(isbn: str) -> BookDetails | None:
     """Fetch the record for one ISBN, or ``None`` if the catalogue has none."""
     key = isbn.strip().replace("-", "").replace(" ", "")
     if not key:
         return None
 
-    payload = _get_json(
-        BOOKS_URL, {"bibkeys": f"ISBN:{key}", "format": "json", "jscmd": "data"}
-    )
+    try:
+        payload = _get_json(
+            BOOKS_URL, {"bibkeys": f"ISBN:{key}", "format": "json", "jscmd": "data"}
+        )
+    except LookupUnavailable:
+        # The books API can be slow or transiently unavailable; the search
+        # index resolves the same ISBN through a different code path, so fall
+        # back to it before letting the add fail.
+        return _isbn_search_details(key)
     if not isinstance(payload, dict):
         raise LookupUnavailable("Open Library books API did not return an object")
 

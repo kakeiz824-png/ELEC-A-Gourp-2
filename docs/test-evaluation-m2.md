@@ -1,7 +1,7 @@
 # M2 Test Suite Evaluation — Shelf Life
 
 **Date:** 2026-08-11
-**Verified:** 181 tests pass, 0 failures, 0 skipped, 1 deprecation warning (Starlette/httpx, not an error). Command: `.venv\Scripts\python.exe -m pytest --basetemp=.test-tmp -q`
+**Verified:** 210 tests pass, 0 failures, 0 skipped, 1 deprecation warning (Starlette/httpx, not an error). Command: `.venv\Scripts\python.exe -m pytest --basetemp=.test-tmp -q`
 
 This table satisfies the M2 requirement to record the origin of every test and classify each AI-generated test. The **Origin** column is the team's to confirm: the repository does not carry per-test labels, so entries marked `[TEAM]` were reconstructed from file content and must be corrected if wrong.
 

@@ -11,6 +11,8 @@ Users can:
   select one to add;
 - organize books across `reading`, `finished`, and `wishlist`;
 - view author, ISBN, publication year, and cover information when available;
+- view an author's biography panel (life dates, photo, and work count) when the
+  catalogue has one;
 - move and delete books;
 - add a rating from 1 to 5 and optional review text; and
 - view shelf counts, review totals, and average ratings.
@@ -18,8 +20,8 @@ Users can:
 ### Current state
 
 The M1 CRUD application is working. The default lookup backend calls the
-`search_book`, `search_by_author`, and `get_book_details` MCP tools through
-`app/mcp_client.py`. The tools use the keyless Open Library client. If MCP, the live
+`search_book`, `search_by_author`, `get_book_details`, and `get_author_details`
+MCP tools through `app/mcp_client.py`. The tools use the keyless Open Library client. If MCP, the live
 service, or the match is unavailable, the application falls back to `seed/books.json`.
 A new book is stored only when the catalogue supplies an ISBN; otherwise `POST /books`
 returns 404 without creating a row. The browser first uses
@@ -42,18 +44,21 @@ resolving it through `get_book_details` rather than by re-running the search, be
 the chosen candidate may have come from page seven and catalogue relevance order
 shifts between requests.
 
-All three course-required M2 MCP catalogue tools are implemented in
-`mcp_server/server.py` and reuse the existing normalized Open Library client. The
-FastAPI application calls the same tools through FastMCP's in-memory transport. The
-direct `openlibrary` backend is diagnostic compatibility, not the default path.
+All four MCP catalogue tools (`search_book`, `search_by_author`, `get_book_details`,
+and `get_author_details`) are implemented in `mcp_server/server.py` and reuse the
+existing normalized Open Library client. The FastAPI application calls the tools
+through FastMCP's in-memory transport. The direct `openlibrary` backend is diagnostic
+compatibility, not the default path. Author profiles are best-effort: an outage or a
+missing biography answers `found=false` without breaking the surrounding search.
 
 ### Current milestone priorities
 
-1. Keep the M1 application stable and tested.
-2. Complete the M2 Open Library MCP tools and connect them through the existing
-   lookup boundary.
-3. Extend the mocked MCP tests and run the required security scan.
-4. Add optional features only after the required M2 work is complete.
+1. Keep the application stable and tested (210 tests).
+2. M2 is complete: four MCP tools, the MCP-connected lookup boundary, mocked tests,
+   and the Semgrep scan recorded in `docs/security-triage.md`.
+3. M3 is complete: deployed on Render, with README, AI usage log, retrospective, and
+   reflection in the repository.
+4. Add optional features only after the required milestone work is complete.
 
 ### Out of scope for the current milestone
 
@@ -80,13 +85,13 @@ SQLite database          services/search.py
                          (one paged search)
                               |
                               v
-                   lookup: search_book / search_author
+                   lookup: search_book / search_author / author_profile
                               |     details_for_isbn
                     +---------+----------+
                     |                    |
              MCP client adapter      seed/books.json
                     |
-   search_book / search_by_author / get_book_details
+   search_book / search_by_author / get_book_details / get_author_details
                     |
             Open Library HTTP
 
@@ -133,6 +138,13 @@ Because the current application has one user, one Book has at most one Review.
 Submitting another rating or review updates that record. Deleting a Book
 cascade-deletes its Review.
 
+#### Author profile
+
+Author biographies are not stored in the database. `GET /authors?name=...` resolves
+the name live through `author_profile` (default `mcp` backend) and returns
+`found=false` with null fields when the catalogue has no biography, so a missing
+profile never breaks the author page.
+
 ### Current API
 
 | Method | Path | Purpose |
@@ -166,6 +178,7 @@ app/
   mcp_client.py        Converts MCP results into BookDetails
   openlibrary.py       Direct Open Library HTTP client
   routers/
+    authors.py         Author profile endpoint
     books.py           Book and shelf endpoints
     reviews.py         Rating and review endpoints
   services/
@@ -182,18 +195,24 @@ static/
   styles.css           Interface styling
 tests/
   conftest.py
+  test_author_profile.py
   test_author_search.py
   test_books.py
   test_lookup.py
   test_mcp_client.py
   test_mcp_server.py
+  test_migrations.py
   test_openlibrary.py
+  test_recent.py
   test_reviews.py
   test_search_paging.py
+  test_turso_adapter.py
 mcp_server/
   __init__.py
   server.py
-```
+docs/
+  security-triage.md
+  test-evaluation-m2.md```
 
 ## 3. How to Run
 
@@ -245,7 +264,8 @@ MCP clients launch the server as a STDIO subprocess:
 ```
 
 The terminal waits silently for an MCP client; this command does not open a web
-page. The server exposes `search_book`, `search_by_author`, and `get_book_details`.
+page. The server exposes `search_book`, `search_by_author`, `get_book_details`, and
+`get_author_details`.
 
 ### Optional configuration
 
@@ -274,6 +294,8 @@ Open Library is keyless. Never add or request an API key for the current integra
   DESIGN.md section 7.6 for the two ways that failed.
 - Keep paging, ISBN de-duplication, and candidate assembly in `services/search.py`.
 - Confirm a submitted ISBN with `details_for_isbn`, never by re-running a search.
+- Treat author profiles as best-effort: never let a missing or failed profile break
+  the author page or the surrounding search.
 - Validate shelf values as `reading`, `finished`, or `wishlist`.
 - Validate ratings as integers from 1 to 5.
 - Require lookup to supply an ISBN before creating a new book.
@@ -318,10 +340,10 @@ Open Library is keyless. Never add or request an API key for the current integra
 4. Mock every external response in tests.
 5. Test empty results, missing fields, timeouts, bad status codes, and malformed data.
 
-### Add the M2 MCP server
+### Maintain the MCP server
 
-1. Keep the tested `search_book`, `search_by_author`, and `get_book_details` tools
-   stable.
+1. Keep the tested `search_book`, `search_by_author`, `get_book_details`, and
+   `get_author_details` tools stable.
 2. Reuse the existing normalization and failure-handling rules.
 3. Keep the MCP client connected through the `lookup` module, never directly from a
    router.

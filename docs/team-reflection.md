@@ -1,8 +1,5 @@
 # Team Reflection — M3
 
-*Target: approximately 800-1000 words. Must be written in your own words; an AI-generated
-reflection is an academic integrity violation. Reference specific interactions from the
-AI Usage Log.*
 
 This reflection covers the M3 milestone of the Shelf Life project. We used Codex, ChatGPT, and Claude Code heavily for implementation, testing, documentation, and review-feedback remediation, and those interactions are logged in the AI usage log. The sections below describe where the AI genuinely helped, where it struggled, what surprised us, and what we would change about our approach.
 

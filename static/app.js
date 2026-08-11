@@ -11,6 +11,7 @@ const searchMode = document.querySelector("#search-mode");
 const searchResults = document.querySelector("#search-results");
 const searchResultsCount = document.querySelector("#search-results-count");
 const searchResultsList = document.querySelector("#search-results-list");
+const searchEmptyMessage = document.querySelector("#search-empty-message");
 const searchResultTemplate = document.querySelector("#search-result-template");
 const pagination = document.querySelector("#pagination");
 const prevPageButton = document.querySelector("#prev-page");
@@ -147,6 +148,7 @@ function describeCandidate(book) {
 function clearSearchResults() {
   searchResultsList.replaceChildren();
   searchResults.hidden = true;
+  searchEmptyMessage.hidden = true;
   pagination.hidden = true;
   currentSearch = null;
   clearAuthorProfile();
@@ -279,13 +281,16 @@ function buildSearchResult(candidate) {
 }
 
 function renderSearchResults(results) {
+  const hasResults = results.items.length > 0;
   searchResultsList.replaceChildren(
     ...results.items.map((candidate) => buildSearchResult(candidate)),
   );
   searchResultsCount.textContent = `${results.total} result${
     results.total === 1 ? "" : "s"
   }`;
-  searchResults.hidden = results.items.length === 0;
+  searchResults.hidden = false;
+  searchResultsList.hidden = !hasResults;
+  searchEmptyMessage.hidden = hasResults;
 
   // The catalogue's page count comes from its match total, which counts every
   // edition it matched -- far more than the ISBN-bearing, de-duplicated books we
@@ -302,8 +307,20 @@ function renderSearchResults(results) {
     : results.page > 1
       ? `Page ${results.page} · No more results`
       : "";
-  pagination.hidden =
-    results.items.length === 0 || (results.page <= 1 && !hasMore);
+  pagination.hidden = !hasResults || (results.page <= 1 && !hasMore);
+}
+
+function searchFailureMessage(error) {
+  if (error instanceof TypeError || !navigator.onLine) {
+    return "You appear to be offline. Check your connection and try searching again.";
+  }
+  if (error.status === 429) {
+    return "The catalogue is busy. Please wait a moment, then try again.";
+  }
+  if (error.status >= 500) {
+    return "The catalogue is temporarily unavailable. Please try again shortly.";
+  }
+  return error.message || "Search failed. Please try again.";
 }
 
 /** Build one book card. All user-supplied text goes in via textContent. */
@@ -442,6 +459,11 @@ async function runSearch(mode, query, page) {
     // Trust the page the server reports, not the one that was asked for.
     currentSearch = { mode, query, page: results.page };
     renderSearchResults(results);
+    const otherMode = mode === "title" ? "author" : "title";
+    searchEmptyMessage.textContent =
+      results.total > 0
+        ? `Matches were found, but none have an ISBN that can be added. Try a different ${mode}.`
+        : `No ${mode} matches were found for “${query}”. Check the spelling or try searching by ${otherMode}.`;
     // Only an author search has a profile, and only the first page loads it;
     // paging through their books keeps the panel already on screen.
     if (mode === "author" && page === 1) {
@@ -450,14 +472,15 @@ async function runSearch(mode, query, page) {
     setHint(
       results.items.length > 0
         ? "Select the correct book below. Nothing is added to a shelf until you pick one."
-        : `No books with an ISBN were found. Try a different ${mode}.`,
+        : searchEmptyMessage.textContent,
       results.items.length > 0 ? undefined : "error",
     );
     if (results.page === 1) {
       titleInput.focus();
     }
   } catch (error) {
-    setHint(error.message || "Search failed. Check the service and try again.", "error");
+    clearSearchResults();
+    setHint(searchFailureMessage(error), "error");
   } finally {
     searching = false;
     addButton.disabled = false;

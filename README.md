@@ -142,16 +142,14 @@ Stop the server by pressing `Ctrl + C` in PowerShell.
 
 ## Demo Workflow
 
-1. Open the web interface.
-2. Type `The Hobbit` into the add-book box.
-3. Select the Reading shelf.
-4. Click **Add book**.
-5. Confirm that the author, ISBN, year, and cover appear.
-6. Add a rating and optional review.
-7. Move the book from Reading to Finished.
-8. Refresh the page and confirm that the data persists.
-9. Switch the selector to **Author**, enter `Ursula K. Le Guin`, and search again. The results are her own novels; add one of them.
-10. Search `Harry Potter` by title and use **Next** to page through the matches.
+Use this two-minute sequence for a live demonstration:
+
+1. With **Title** selected and **Reading** as the shelf, enter `The Hobbit` and click **Search books**.
+2. Choose an edition. Confirm that its author, ISBN, publication year, and cover appear on the Reading shelf.
+3. Add a rating and short review, then move the book to **Finished** and refresh the page to show that it persists.
+4. Switch to **Author**, search for `Ursula K. Le Guin`, and add one of her books. This demonstrates that author search returns books *by* the author.
+5. Switch back to **Title**, search `Harry Potter`, and use **Next** to demonstrate paged results.
+6. Search for `A title that does not exist` to show the clear no-results guidance. Temporarily disconnect from the network (or stop the API) to demonstrate the retry guidance.
 
 To demonstrate the offline fallback without calling Open Library, set the lookup backend to `seed` before starting the server:
 

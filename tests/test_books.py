@@ -22,7 +22,7 @@ def test_home_page_renders_three_shelves(client) -> None:
     assert "Reading" in response.text
     assert "Finished" in response.text
     assert "Wishlist" in response.text
-    assert "/static/app.js?v=20260805-cover-placeholder" in response.text
+    assert "/static/app.js?v=20260811-search-feedback" in response.text
 
 
 def test_cover_placeholder_asset_is_served(client) -> None:

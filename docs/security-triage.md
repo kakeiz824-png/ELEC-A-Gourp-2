@@ -68,4 +68,4 @@ uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
 - MCP-only pass: 290 rules, 4 files, 0 findings.
 - `p/security-audit`: 79 rules, 36 files, 0 findings.
 - `p/owasp-top-ten`: 218 rules, 40 files, 0 findings.
-- Manual review covered CORS allowlist, SQL parameterization, Jinja autoescaping, DOM sinks (textContent only), and server configuration; full test suite: 206 passed.
+- Manual review covered CORS allowlist, SQL parameterization, Jinja autoescaping, DOM sinks (textContent only), and server configuration; full test suite: 210 passed.

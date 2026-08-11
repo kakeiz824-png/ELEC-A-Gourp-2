@@ -1,5 +1,7 @@
 """Tag endpoint tests: setting, listing, filtering, validation, and cleanup."""
 
+import httpx
+
 
 def _add(client, title: str, shelf: str = "reading") -> dict:
     """Add a book through the seeded offline lookup."""
@@ -98,3 +100,33 @@ def test_get_book_returns_its_tags(client) -> None:
     data = client.get(f"/books/{book['id']}").json()
 
     assert data["tags"] == ["classic"]
+
+def test_tag_suggestions_come_from_open_library(client, mock_openlibrary) -> None:
+    """The tag editor can suggest subjects from the Open Library catalogue."""
+    book = _add(client, "The Hobbit")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"numFound": 1, "docs": [{"subject": ["Science fiction", "Aliens"]}]},
+        )
+
+    mock_openlibrary(handler)
+
+    resp = client.get(f"/books/{book['id']}/tag-suggestions")
+
+    assert resp.status_code == 200
+    assert resp.json()["subjects"] == ["Science fiction", "Aliens"]
+
+
+def test_tag_suggestions_are_empty_when_the_catalogue_is_offline(client) -> None:
+    book = _add(client, "The Hobbit")
+
+    resp = client.get(f"/books/{book['id']}/tag-suggestions")
+
+    assert resp.status_code == 200
+    assert resp.json()["subjects"] == []
+
+
+def test_tag_suggestions_for_a_missing_book_return_404(client) -> None:
+    assert client.get("/books/9999/tag-suggestions").status_code == 404

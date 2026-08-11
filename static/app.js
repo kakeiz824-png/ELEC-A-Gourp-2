@@ -412,12 +412,46 @@ function buildCard(book) {
     }
   }
 
+  const suggestionsContainer = node.querySelector(".tag-suggestions");
+
+  async function loadSuggestions() {
+    suggestionsContainer.replaceChildren();
+    let subjects = [];
+    try {
+      const data = await api(`/books/${book.id}/tag-suggestions`);
+      subjects = data.subjects || [];
+    } catch (_error) {
+      subjects = []; // suggestions are best-effort; never block editing
+    }
+    if (subjects.length === 0) {
+      return;
+    }
+    const label = document.createElement("span");
+    label.className = "tag-suggestions-label";
+    label.textContent = "Suggested from Open Library";
+    suggestionsContainer.appendChild(label);
+    for (const subject of subjects) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "tag-suggestion";
+      chip.textContent = subject;
+      chip.addEventListener("click", () => {
+        if (!draftTags.includes(subject)) {
+          draftTags.push(subject);
+          renderDraftTags();
+        }
+      });
+      suggestionsContainer.appendChild(chip);
+    }
+  }
+
   tagsButton.addEventListener("click", () => {
     if (tagEdit.hidden) {
       draftTags = [...(book.tags || [])];
       tagInput.value = "";
       renderDraftTags();
       tagEdit.hidden = false;
+      loadSuggestions();
       tagInput.focus();
     } else {
       tagEdit.hidden = true;

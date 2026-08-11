@@ -359,6 +359,53 @@ def get_book_details(isbn: str) -> BookDetails | None:
     )
 
 
+_GENERIC_SUBJECTS = {"fiction", "novel", "specimens", "tales", "stories"}
+MAX_SUBJECT_LENGTH = 50
+MAX_SUBJECTS = 10
+
+
+def subjects_for_isbn(isbn: str) -> list[str]:
+    """Top cleaned subject suggestions for one ISBN, best-effort.
+
+    The books API does not return subjects, so this uses the search index (the
+    same endpoint family as the ISBN-search fallback) and never raises: a
+    missing or slow catalogue simply yields no suggestions.
+    """
+    key = isbn.strip().replace("-", "").replace(" ", "")
+    if not key:
+        return []
+    try:
+        payload = _get_json(
+            SEARCH_URL, {"q": f"isbn:{key}", "limit": 1, "fields": "subject"}
+        )
+        docs, _ = _docs(payload, "subject search")
+    except LookupUnavailable:
+        return []
+    if not docs or not isinstance(docs[0], dict):
+        return []
+
+    raw = docs[0].get("subject")
+    if not isinstance(raw, list):
+        return []
+
+    seen: set[str] = set()
+    subjects: list[str] = []
+    for value in raw:
+        if not isinstance(value, str):
+            continue
+        name = value.strip()
+        folded = name.casefold()
+        if not name or folded in seen or folded in _GENERIC_SUBJECTS:
+            continue
+        if len(name) > MAX_SUBJECT_LENGTH:
+            continue
+        seen.add(folded)
+        subjects.append(name)
+        if len(subjects) >= MAX_SUBJECTS:
+            break
+    return subjects
+
+
 def _text(value: object) -> str | None:
     """A stripped non-empty string, or ``None`` for anything else."""
     return value.strip() if isinstance(value, str) and value.strip() else None

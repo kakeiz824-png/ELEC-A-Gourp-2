@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.db import get_db
 from app.details import normalise_isbn
-from app.lookup import BookDetails, details_for_isbn, lookup
+from app.lookup import BookDetails, details_for_isbn, lookup, subject_suggestions
 from app.models import (
     Book,
     BookCreate,
@@ -320,6 +320,18 @@ def update_book_tags(
     book = row_to_book(fetch_book(connection, book_id))
     book["tags"] = _tags_for_books(connection, [book_id]).get(book_id, [])
     return book
+
+
+@router.get("/{book_id}/tag-suggestions")
+def book_tag_suggestions(
+    book_id: int,
+    connection: sqlite3.Connection = Depends(get_db),
+) -> dict[str, list[str]]:
+    """Subject suggestions from the catalogue for the tag editor (best-effort)."""
+    row = fetch_book(connection, book_id)
+    if not row["isbn"]:
+        return {"subjects": []}
+    return {"subjects": subject_suggestions(row["isbn"])}
 
 
 @router.get("/{book_id}", response_model=BookWithReviews)

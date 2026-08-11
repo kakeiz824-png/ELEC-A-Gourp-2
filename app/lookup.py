@@ -359,6 +359,18 @@ def author_profile(name: str) -> AuthorDetails | None:
     return value
 
 
+def subject_suggestions(isbn: str) -> list[str]:
+    """Best-effort Open Library subject suggestions for one ISBN.
+
+    The seed catalogue carries no subjects and the MCP tools do not expose
+    them, so this enrichment talks to the direct Open Library client only.
+    A missing or slow catalogue yields an empty list, never an error.
+    """
+    if active_backend() == SEED_BACKEND:
+        return []
+    return openlibrary.subjects_for_isbn(isbn)
+
+
 def lookup(title: str) -> BookDetails | None:
     """Return the best ISBN-bearing match for a title, or ``None``.
 

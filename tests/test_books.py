@@ -22,7 +22,7 @@ def test_home_page_renders_three_shelves(client) -> None:
     assert "Reading" in response.text
     assert "Finished" in response.text
     assert "Wishlist" in response.text
-    assert "/static/app.js?v=20260811-tags" in response.text
+    assert "/static/app.js?v=20260811-tags-suggestions" in response.text
     assert 'id="tag-bar"' in response.text
     assert 'id="shelf-select"' not in response.text
     assert 'class="search-result-shelf"' in response.text

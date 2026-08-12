@@ -22,10 +22,12 @@ def test_home_page_renders_three_shelves(client) -> None:
     assert "Reading" in response.text
     assert "Finished" in response.text
     assert "Wishlist" in response.text
-    assert "/static/app.js?v=20260812-google-login-tags" in response.text
+    assert "/static/app.js?v=20260812-recommendations" in response.text
     assert 'id="tag-bar"' in response.text
     assert 'id="shelf-select"' not in response.text
     assert 'class="search-result-shelf"' in response.text
+    assert 'id="recommendations"' in response.text
+    assert 'id="recommendation-template"' in response.text
 
 
 def test_cover_placeholder_asset_is_served(client) -> None:

@@ -208,15 +208,21 @@ No Open Library account or API key is required.
 | `GET` | `/health` | Check application status |
 | `GET` | `/books` | List books, optionally filtered by shelf |
 | `GET` | `/books/search` | Return one page of selectable candidates for `?title=` or `?author=`, storing nothing |
-| `POST` | `/books` | Add a book and attempt metadata lookup |
+| `POST` | `/books` | Add a book, attempt metadata lookup, and auto-file it under its broad categories |
 | `GET` | `/books/{id}` | Get one book with its reviews |
 | `PATCH` | `/books/{id}/shelf` | Move a book to another shelf |
 | `POST` | `/books/{id}/enrich` | Retry metadata lookup |
 | `DELETE` | `/books/{id}` | Delete a book and its reviews |
 | `GET` | `/books/{id}/reviews` | List reviews for a book |
 | `POST` | `/books/{id}/reviews` | Add a rating and optional review |
+| `PUT` | `/books/{id}/tags` | Replace a book's tags with the supplied set |
+| `GET` | `/books/{id}/tag-suggestions` | Broad category suggestions for a book, from the catalogue |
+| `GET` | `/tags` | List every tag with how many books carry it |
 | `GET` | `/authors` | Return an author's profile (bio, dates, work count) for `?name=`; `found=false` when none is available |
+| `GET` | `/recommendations` | Suggest unread books in the categories the reader reads most (`?limit=`) |
 | `GET` | `/stats` | Return reading and rating statistics |
+
+`GET /recommendations` is content-based: it reads the broad categories of the reader's own finished and reading books, asks the catalogue for other books under the top few, and excludes any the reader already tracks. It is best-effort — a new library, a library with only free-form tags, or an offline catalogue all return an empty list rather than an error. Categories are the same broad buckets `POST /books` files a new book under automatically.
 
 Example add request:
 

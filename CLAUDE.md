@@ -181,7 +181,7 @@ user's book id is indistinguishable from a missing one (404). `GET /` and
 | `GET` | `/health` | Return application health |
 | `GET` | `/books` | List books; optionally filter with `?shelf=` |
 | `GET` | `/books/search` | Return one page of distinct ISBN-bearing candidates without storing them; takes exactly one of `?title=` or `?author=`, plus `?page=` and `?per_page=` |
-| `POST` | `/books` | Add the selected ISBN; return 404 without an ISBN or 409 if it already exists |
+| `POST` | `/books` | Add the selected ISBN; return 404 without an ISBN or 409 if it already exists. A newly created book is auto-filed under its broad categories (best-effort) |
 | `GET` | `/books/{id}` | Return one book with its reviews |
 | `PATCH` | `/books/{id}/shelf` | Move a book to another shelf |
 | `POST` | `/books/{id}/enrich` | Retry metadata lookup |
@@ -189,6 +189,7 @@ user's book id is indistinguishable from a missing one (404). `GET /` and
 | `GET` | `/books/{id}/reviews` | List reviews for a book |
 | `POST` | `/books/{id}/reviews` | Create or update the personal rating and review |
 | `GET` | `/authors` | Return one author's profile for `?name=`; `found=false` with null fields when none is available |
+| `GET` | `/recommendations` | Suggest unread books in the categories the caller reads most (`?limit=`); content-based and best-effort, empty when there is nothing to suggest |
 | `GET` | `/stats` | Return shelf and rating statistics |
 
 There is no general book-update endpoint and no update/delete endpoint for an
@@ -209,12 +210,15 @@ app/
   routers/
     auth.py            Sign-in, OAuth callback, and sign-out routes
     authors.py         Author profile endpoint
-    books.py           Book and shelf endpoints
+    books.py           Book, shelf, and tag endpoints (incl. auto-categorisation on add)
     reviews.py         Rating and review endpoints
+    tags.py            Tag listing with book counts
+    recommendations.py Category-based recommendation endpoint
   services/
     books.py           Duplicate-safe book creation
     reviews.py         Single-user review upsert
     search.py          Pages one catalogue search into selectable candidates
+    recommendations.py Ranks the reader's categories and gathers unread books in them
     stats.py           Reading statistics
 seed/
   books.json           Offline catalogue and network fallback

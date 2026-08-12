@@ -289,6 +289,36 @@ def search_author(
     return _details_page(docs, total)
 
 
+def search_by_subject(
+    subject: str, *, limit: int = SEARCH_LIMIT, offset: int = 0
+) -> SearchPage:
+    """Search Open Library for books filed under a subject, best match first.
+
+    ``subject=`` queries the catalogue's subject index, so it answers "other
+    books like the ones this reader finished" -- the basis for recommendations.
+    Open Library's own relevance order is kept, as in ``search_book``. Docs
+    without a title are dropped by ``_details_page``; the caller drops those with
+    no ISBN, since only an addable book is worth recommending.
+    """
+    query = normalise(subject)
+    if not query:
+        return SearchPage(results=[], total=0)
+
+    docs, total = _docs(
+        _get_json(
+            SEARCH_URL,
+            {
+                "subject": subject.strip(),
+                "limit": limit,
+                "offset": offset,
+                "fields": SEARCH_FIELDS,
+            },
+        ),
+        "subject search",
+    )
+    return _details_page(docs, total)
+
+
 def _isbn_search_details(key: str) -> BookDetails | None:
     """Resolve one ISBN through the search index instead of the books API."""
     payload = _get_json(
@@ -425,6 +455,23 @@ CATEGORY_KEYWORDS = {
         "tales",
         "adventure",
     ),
+}
+
+
+# The reverse of the keyword table: one canonical Open Library subject to query
+# when we want *more* books in a broad category (recommendations), rather than
+# classifying a book we already have. Each value is a subject Open Library files
+# a large, healthy set of books under, so a category always has candidates to
+# offer. Keys must stay in step with ``CATEGORY_KEYWORDS``.
+CATEGORY_SUBJECT_QUERY = {
+    "Sci-Fi & Fantasy": "science fiction",
+    "Mystery & Thriller": "mystery",
+    "Romance": "romance",
+    "Kids & YA": "juvenile fiction",
+    "Poetry & Drama": "poetry",
+    "Non-fiction": "history",
+    "Classics": "classics",
+    "Fiction & Literature": "fiction",
 }
 
 

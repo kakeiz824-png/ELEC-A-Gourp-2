@@ -24,6 +24,9 @@ const authorPhoto = document.querySelector("#author-photo");
 const authorName = document.querySelector("#author-name");
 const authorMeta = document.querySelector("#author-meta");
 const authorBio = document.querySelector("#author-bio");
+const recommendations = document.querySelector("#recommendations");
+const recommendationsList = document.querySelector("#recommendations-list");
+const recommendationTemplate = document.querySelector("#recommendation-template");
 
 const PLACEHOLDERS = {
   title: "e.g. The Hobbit",
@@ -585,6 +588,58 @@ function renderStats(stats) {
     stats.average_rating === null ? "—" : stats.average_rating.toFixed(1);
 }
 
+/** Build one recommendation card, wired to add the book to the chosen shelf. */
+function buildRecommendation(rec) {
+  const node = recommendationTemplate.content.firstElementChild.cloneNode(true);
+
+  const cover = node.querySelector(".recommendation-cover");
+  setCoverImage(cover, rec);
+
+  node.querySelector(".recommendation-reason").textContent =
+    `Because you read ${rec.category}`;
+  node.querySelector(".recommendation-title").textContent = rec.title;
+  node.querySelector(".recommendation-meta").textContent = describeCandidate(rec);
+
+  const addButton = node.querySelector(".add-recommendation-button");
+  addButton.addEventListener("click", async () => {
+    addButton.disabled = true;
+    const shelf = node.querySelector(".recommendation-shelf").value;
+    setHint(`Adding "${rec.title}" to ${shelf}...`, "working");
+    try {
+      await api("/books", {
+        method: "POST",
+        body: JSON.stringify({ title: rec.title, isbn: rec.isbn, shelf }),
+      });
+      setHint("Added from your recommendations.");
+      // refresh() re-renders the shelves and reloads recommendations, so the
+      // just-added book drops off the strip on its own.
+      await refresh();
+    } catch (error) {
+      addButton.disabled = false;
+      setHint(error.message || "Could not add that book.", "error");
+    }
+  });
+
+  return node;
+}
+
+/** Load category recommendations. Best-effort: any failure just hides the strip. */
+async function loadRecommendations() {
+  try {
+    const items = await api("/recommendations");
+    if (!items.length) {
+      recommendationsList.replaceChildren();
+      recommendations.hidden = true;
+      return;
+    }
+    recommendationsList.replaceChildren(...items.map(buildRecommendation));
+    recommendations.hidden = false;
+  } catch {
+    // Recommendations are a bonus; their absence must not disturb the shelves.
+    recommendations.hidden = true;
+  }
+}
+
 /** Reload every shelf and the statistics bar from the API. */
 async function refresh() {
   const [books, stats, tags] = await Promise.all([
@@ -608,6 +663,11 @@ async function refresh() {
   }
 
   renderStats(stats);
+
+  // The recommendations strip depends on the categories of the just-rendered
+  // shelves and can be slow (it queries the live catalogue), so it is loaded
+  // without blocking the shelves the reader is waiting on.
+  loadRecommendations();
 }
 
 /** True while a search is in flight, so a double click cannot fetch twice. */

@@ -43,6 +43,7 @@ __all__ = [
     "BookDetails",
     "SearchPage",
     "author_profile",
+    "books_in_category",
     "details_for_isbn",
     "lookup",
     "normalise",
@@ -371,6 +372,43 @@ def tag_suggestions(isbn: str) -> list[str]:
     if active_backend() == SEED_BACKEND:
         return []
     return openlibrary.suggest_categories(openlibrary.subjects_for_isbn(isbn))
+
+
+def books_in_category(category: str, *, limit: int = DEFAULT_LIMIT) -> list[BookDetails]:
+    """Live catalogue books filed under a broad category, best-effort.
+
+    This backs recommendations. Like ``tag_suggestions`` it talks to the direct
+    Open Library client regardless of the active backend, because the seed
+    carries no subjects and the MCP tools do not expose a subject search; the
+    seed backend and any catalogue outage answer with an empty list rather than
+    an error. Only ISBN-bearing results are returned, since a book with no ISBN
+    cannot be added. A genuine answer is cached for the usual TTL so a page of
+    recommendations does not re-query the same categories on every refresh.
+    """
+    if active_backend() == SEED_BACKEND:
+        return []
+    subject = openlibrary.CATEGORY_SUBJECT_QUERY.get(category)
+    if subject is None:
+        return []
+
+    cache_key = (active_backend(), "category", normalise(category), limit)
+
+    def fetch() -> list[BookDetails]:
+        try:
+            page = openlibrary.search_by_subject(subject, limit=limit)
+        except openlibrary.LookupUnavailable:
+            logger.warning("category lookup unavailable for %r", category)
+            return []
+        return [details for details in page.results if normalise_isbn(details.isbn)]
+
+    # An empty list is cached like any other answer. That briefly pins an
+    # outage-driven empty for the TTL, but recommendations are a bonus strip, not
+    # a search result, so a few minutes without them after a blip is acceptable
+    # -- and caching spares the catalogue a fan-out of subject queries on every
+    # shelf refresh.
+    value = _cached_lookup(cache_key, fetch)
+    assert isinstance(value, list)
+    return value
 
 
 def lookup(title: str) -> BookDetails | None:

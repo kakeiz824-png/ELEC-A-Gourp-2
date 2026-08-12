@@ -93,6 +93,26 @@ def test_get_book_details_falls_back_to_isbn_search_when_books_api_fails(
     assert details.isbn == "9780261103344"
 
 
+def test_search_by_subject_queries_the_subject_index(mock_openlibrary) -> None:
+    """A recommendation query hits the subject index and maps the docs it gets."""
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json=SEARCH_DOC)
+
+    mock_openlibrary(handler)
+
+    page = openlibrary.search_by_subject("science fiction")
+
+    assert "subject=science+fiction" in seen["url"]
+    assert page.total == 224
+    assert [book.title for book in page.results] == [
+        "The Hobbit",
+        "The Hobbit: Graphic Novel",
+    ]
+
+
 def test_search_book_maps_a_real_search_response(mock_openlibrary) -> None:
     mock_openlibrary(json_route(SEARCH_DOC))
 

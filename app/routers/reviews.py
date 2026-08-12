@@ -4,6 +4,7 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, Response, status
 
+from app.auth import get_current_user
 from app.db import get_db
 from app.models import Review, ReviewCreate
 from app.routers.books import fetch_book
@@ -16,10 +17,11 @@ router = APIRouter(prefix="/books", tags=["reviews"])
 @router.get("/{book_id}/reviews", response_model=list[Review])
 def list_reviews(
     book_id: int,
+    user: dict = Depends(get_current_user),
     connection: sqlite3.Connection = Depends(get_db),
 ) -> list[dict]:
-    """List the reviews on a book, newest first."""
-    fetch_book(connection, book_id)
+    """List the reviews on one of the user's books, newest first."""
+    fetch_book(connection, book_id, user["id"])
     rows = connection.execute(
         "SELECT * FROM reviews WHERE book_id = ? ORDER BY created_at DESC, id DESC",
         (book_id,),
@@ -34,10 +36,11 @@ def create_review(
     book_id: int,
     payload: ReviewCreate,
     response: Response,
+    user: dict = Depends(get_current_user),
     connection: sqlite3.Connection = Depends(get_db),
 ) -> dict:
-    """Create or update the user's rating and optional review text."""
-    fetch_book(connection, book_id)
+    """Create or update the user's rating and optional review text on their book."""
+    fetch_book(connection, book_id, user["id"])
     result = save_personal_review(
         connection,
         book_id=book_id,

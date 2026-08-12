@@ -73,6 +73,13 @@ async function api(path, options = {}) {
     ...options,
   });
 
+  if (response.status === 401) {
+    // The session expired or was cleared in another tab: send the user back
+    // through Google rather than surfacing a bare "unauthorized" error.
+    window.location = "/login";
+    throw new Error("Not signed in");
+  }
+
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     const message =
@@ -488,40 +495,45 @@ async function runSearch(mode, query, page) {
   }
 }
 
-addForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
+// Everything below wires up the tracker UI. On the signed-out page that UI is
+// not rendered (the template shows a sign-in card instead), so bail out rather
+// than attach listeners to elements that do not exist.
+if (addForm) {
+  addForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
 
-  const query = titleInput.value.trim();
-  if (!query) {
-    return;
-  }
+    const query = titleInput.value.trim();
+    if (!query) {
+      return;
+    }
 
-  const mode = searchMode.value;
-  clearSearchResults();
-  await runSearch(mode, query, 1);
-});
+    const mode = searchMode.value;
+    clearSearchResults();
+    await runSearch(mode, query, 1);
+  });
 
-prevPageButton.addEventListener("click", () => {
-  if (currentSearch) {
-    runSearch(currentSearch.mode, currentSearch.query, currentSearch.page - 1);
-  }
-});
+  prevPageButton.addEventListener("click", () => {
+    if (currentSearch) {
+      runSearch(currentSearch.mode, currentSearch.query, currentSearch.page - 1);
+    }
+  });
 
-nextPageButton.addEventListener("click", () => {
-  if (currentSearch) {
-    runSearch(currentSearch.mode, currentSearch.query, currentSearch.page + 1);
-  }
-});
+  nextPageButton.addEventListener("click", () => {
+    if (currentSearch) {
+      runSearch(currentSearch.mode, currentSearch.query, currentSearch.page + 1);
+    }
+  });
 
-searchMode.addEventListener("change", () => {
-  // The two indexes answer different questions, so old results would mislead.
-  titleInput.placeholder = PLACEHOLDERS[searchMode.value];
-  clearSearchResults();
-  setHint(`Searching by ${searchMode.value}.`);
-  titleInput.focus();
-});
+  searchMode.addEventListener("change", () => {
+    // The two indexes answer different questions, so old results would mislead.
+    titleInput.placeholder = PLACEHOLDERS[searchMode.value];
+    clearSearchResults();
+    setHint(`Searching by ${searchMode.value}.`);
+    titleInput.focus();
+  });
 
-updateApiStatus();
-refresh().catch(() => {
-  setHint("Could not load your shelves. Check the API and reload.", "error");
-});
+  updateApiStatus();
+  refresh().catch(() => {
+    setHint("Could not load your shelves. Check the API and reload.", "error");
+  });
+}

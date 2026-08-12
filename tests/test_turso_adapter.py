@@ -18,21 +18,28 @@ libsql = pytest.importorskip("libsql")
 
 @pytest.fixture()
 def turso_conn():
-    """A wrapped in-memory libSQL connection with the app schema applied."""
+    """A wrapped in-memory libSQL connection with the app schema applied.
+
+    A user row (id=1) is seeded because books are now owned and the unique index
+    is on ``(user_id, identity_key)``; the inserts below all use ``user_id=1``.
+    """
     connection = db._TursoConnection(libsql.connect(":memory:"))
     connection.executescript(db.SCHEMA)
     db._migrate_unique_books(connection)
     db._migrate_single_user_reviews(connection)
+    connection.execute(
+        "INSERT INTO users (id, google_sub, email) VALUES (1, 'sub', 'a@b.c')"
+    )
     connection.commit()
     yield connection
     connection.close()
 
 
-def _insert_book(connection, *, title, isbn, shelf="reading"):
+def _insert_book(connection, *, title, isbn, shelf="reading", user_id=1):
     cursor = connection.execute(
-        "INSERT INTO books (title, author, isbn, cover_url, year, shelf, "
-        "details_pending, identity_key) VALUES (?,?,?,?,?,?,?,?)",
-        (title, None, isbn, None, None, shelf, 0, f"isbn:{isbn}"),
+        "INSERT INTO books (user_id, title, author, isbn, cover_url, year, shelf, "
+        "details_pending, identity_key) VALUES (?,?,?,?,?,?,?,?,?)",
+        (user_id, title, None, isbn, None, None, shelf, 0, f"isbn:{isbn}"),
     )
     connection.commit()
     return cursor.lastrowid
@@ -66,7 +73,7 @@ def test_collect_stats_over_turso(turso_conn):
     from app.services.stats import collect_stats
 
     _insert_book(turso_conn, title="A", isbn="1111111111111", shelf="reading")
-    stats = collect_stats(turso_conn)
+    stats = collect_stats(turso_conn, 1)
     assert stats["total"] == 1
     assert stats["by_shelf"]["reading"] == 1
     assert stats["average_rating"] is None

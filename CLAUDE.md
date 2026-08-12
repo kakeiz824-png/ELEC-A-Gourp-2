@@ -2,10 +2,14 @@
 
 ## 1. Project Overview
 
-Shelf Life is a single-user personal reading tracker built with FastAPI, SQLite,
-Jinja2, HTML, CSS, and vanilla JavaScript.
+Shelf Life is a personal reading tracker built with FastAPI, SQLite, Jinja2,
+HTML, CSS, and vanilla JavaScript. Each person signs in with their Google
+account and sees only their own shelves; every book and review is owned by the
+signed-in user.
 
 Users can:
+
+- sign in and out with Google (OpenID Connect via Authlib);
 
 - search by book title or by author name, page through the ISBN-bearing matches, and
   select one to add;
@@ -62,7 +66,8 @@ missing biography answers `found=false` without breaking the surrounding search.
 
 ### Out of scope for the current milestone
 
-- User accounts, friendships, chatrooms, and social permissions.
+- Friendships, chatrooms, and social permissions (per-user accounts now exist,
+  but users cannot see or share with each other).
 - AI-assisted conversational book discovery.
 - Collaborative recommendations based on user behavior.
 - Implementing all future roadmap ideas during M2.
@@ -109,11 +114,25 @@ into the internal `BookDetails` shape before it reaches the routers or database.
 
 ### Data model
 
+#### User
+
+| Field | Type | Rules |
+|---|---|---|
+| `id` | Integer | SQLite primary key |
+| `google_sub` | Text | Google's stable subject id; unique |
+| `email` | Text | From the Google profile |
+| `name` | Text or null | Display name from the Google profile |
+| `picture` | Text or null | Avatar URL from the Google profile |
+| `created_at` | Timestamp text | Assigned by SQLite |
+
+Users are created or refreshed on each sign-in, keyed by `google_sub`.
+
 #### Book
 
 | Field | Type | Rules |
 |---|---|---|
 | `id` | Integer | SQLite primary key |
+| `user_id` | Integer | Owner; foreign key to `User`, cascade delete |
 | `title` | Text | Required, trimmed, 1-300 characters |
 | `author` | Text or null | Filled by lookup when available |
 | `isbn` | Text or null | Required for new books; null remains possible only on legacy rows |
@@ -121,7 +140,7 @@ into the internal `BookDetails` shape before it reaches the routers or database.
 | `year` | Integer or null | First publication year when available |
 | `shelf` | Text | `reading`, `finished`, or `wishlist` |
 | `details_pending` | Boolean/integer | True when enrichment is incomplete |
-| `identity_key` | Text | Internal normalized ISBN; unique across tracked books |
+| `identity_key` | Text | Internal normalized ISBN; unique per user (`(user_id, identity_key)`) |
 | `created_at` | Timestamp text | Assigned by SQLite |
 
 #### Review
@@ -134,9 +153,10 @@ into the internal `BookDetails` shape before it reaches the routers or database.
 | `text` | Text or null | Optional, maximum 2,000 characters |
 | `created_at` | Timestamp text | Assigned by SQLite |
 
-Because the current application has one user, one Book has at most one Review.
-Submitting another rating or review updates that record. Deleting a Book
-cascade-deletes its Review.
+One Book has at most one Review: submitting another rating or review updates
+that record. A Book belongs to one user, so a Review is implicitly that user's.
+Deleting a Book cascade-deletes its Review, and deleting a User cascade-deletes
+their Books (and those Books' Reviews).
 
 #### Author profile
 
@@ -147,9 +167,17 @@ profile never breaks the author page.
 
 ### Current API
 
+All book, review, and stats endpoints require a signed-in session and act only
+on the caller's own rows; an unauthenticated request receives 401, and another
+user's book id is indistinguishable from a missing one (404). `GET /` and
+`GET /health` are public.
+
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/` | Render the three-shelf interface |
+| `GET` | `/` | Render the three-shelf interface, or a sign-in prompt when signed out |
+| `GET` | `/login` | Start Google sign-in (redirect to Google) |
+| `GET` | `/auth/callback` | Complete sign-in, open a session, redirect home |
+| `GET` | `/logout` | Clear the session and redirect home |
 | `GET` | `/health` | Return application health |
 | `GET` | `/books` | List books; optionally filter with `?shelf=` |
 | `GET` | `/books/search` | Return one page of distinct ISBN-bearing candidates without storing them; takes exactly one of `?title=` or `?author=`, plus `?page=` and `?per_page=` |
@@ -170,7 +198,8 @@ individual review. Do not assume these endpoints exist.
 
 ```text
 app/
-  main.py              FastAPI entry point and page/health/stats routes
+  main.py              FastAPI entry point, session middleware, page/health/stats
+  auth.py              Google OAuth client and the current-user dependency
   db.py                SQLite schema and connection helpers
   models.py            Pydantic request and response models
   details.py           Normalized BookDetails value type
@@ -178,6 +207,7 @@ app/
   mcp_client.py        Converts MCP results into BookDetails
   openlibrary.py       Direct Open Library HTTP client
   routers/
+    auth.py            Sign-in, OAuth callback, and sign-out routes
     authors.py         Author profile endpoint
     books.py           Book and shelf endpoints
     reviews.py         Rating and review endpoints
@@ -275,8 +305,19 @@ page. The server exposes `search_book`, `search_by_author`, `get_book_details`, 
 | `SHELF_LIFE_ORIGINS` | localhost origins | Comma-separated CORS allowlist |
 | `SHELF_LIFE_LOOKUP_BACKEND` | `mcp` | Use `mcp`, diagnostic `openlibrary`, or offline `seed` |
 | `SHELF_LIFE_OPENLIBRARY_TIMEOUT` | `10` | Open Library timeout in seconds |
+| `GOOGLE_CLIENT_ID` | — | Google OAuth client id (required to sign in) |
+| `GOOGLE_CLIENT_SECRET` | — | Google OAuth client secret (required to sign in) |
+| `SESSION_SECRET` | random per boot | Signs the session cookie; set a stable value in production |
+| `OAUTH_REDIRECT_URI` | callback route URL | Explicit https callback for production behind a proxy |
+| `SESSION_HTTPS_ONLY` | off | Set to `1` in production so the session cookie is HTTPS-only |
 
 Open Library is keyless. Never add or request an API key for the current integration.
+
+Google sign-in needs an OAuth client from the Google Cloud Console with the
+callback (`<origin>/auth/callback`) registered as an Authorized redirect URI —
+both `http://127.0.0.1:8000/auth/callback` for local dev and the deployed https
+URL. Tests never contact Google: they override the `get_current_user` /
+`optional_user` dependencies (see `tests/conftest.py`).
 
 ## 4. Code Conventions
 

@@ -167,10 +167,15 @@ profile never breaks the author page.
 
 ### Current API
 
-All book, review, and stats endpoints require a signed-in session and act only
-on the caller's own rows; an unauthenticated request receives 401, and another
-user's book id is indistinguishable from a missing one (404). `GET /` and
-`GET /health` are public.
+All book, review, tag, recommendation, and stats endpoints require a signed-in
+session and act only on the caller's own rows; an unauthenticated request
+receives 401, and another user's book id is indistinguishable from a missing one
+(404). `GET /` and `GET /health` are public.
+
+Tag rows are shared by name across users so two readers filing books under the
+same category reuse one row, but *whose* books carry a tag is private: `GET
+/tags` counts only the caller's books, so its counts always agree with what
+`GET /books?tag=` returns.
 
 | Method | Path | Purpose |
 |---|---|---|

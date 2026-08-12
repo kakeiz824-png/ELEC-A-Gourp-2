@@ -5,6 +5,7 @@ import sqlite3
 import httpx
 
 import app.routers.books as books_router
+from app.db import get_connection
 
 
 def _add(client, title: str, shelf: str = "reading") -> dict:
@@ -89,6 +90,70 @@ def test_deleting_a_book_removes_orphan_tags(client) -> None:
 
     names = {tag["name"] for tag in client.get("/tags").json()}
     assert names == {"shared", "only-keep"}
+
+
+def test_the_filter_bar_only_counts_the_callers_own_books(client) -> None:
+    """Another reader's tags must never appear in this reader's filter bar.
+
+    Tag rows are shared by name across users, so counting every ``book_tags`` row
+    showed a category the caller owns nothing under -- a count that
+    ``GET /books?tag=`` then answered with an empty shelf.
+    """
+    mine = _add(client, "The Hobbit")
+    client.put(f"/books/{mine['id']}/tags", json={"tags": ["Sci-Fi & Fantasy"]})
+
+    connection = get_connection()
+    try:
+        connection.execute(
+            "INSERT INTO users (id, google_sub, email, name, picture) "
+            "VALUES (2, 'other-sub', 'other@example.com', 'Other', NULL)"
+        )
+        cursor = connection.execute(
+            "INSERT INTO books (user_id, title, shelf, details_pending, identity_key) "
+            "VALUES (2, 'Sapiens', 'finished', 0, 'isbn:9780062316097')"
+        )
+        tag_cursor = connection.execute("INSERT INTO tags (name) VALUES ('Non-fiction')")
+        connection.execute(
+            "INSERT INTO book_tags (book_id, tag_id) VALUES (?, ?)",
+            (cursor.lastrowid, tag_cursor.lastrowid),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    tags = {tag["name"]: tag["count"] for tag in client.get("/tags").json()}
+
+    assert tags == {"Sci-Fi & Fantasy": 1}
+
+
+def test_a_shared_tag_counts_only_the_callers_books(client) -> None:
+    """A tag two readers both use reports only how many of *your* books carry it."""
+    mine = _add(client, "The Hobbit")
+    client.put(f"/books/{mine['id']}/tags", json={"tags": ["Sci-Fi & Fantasy"]})
+
+    shared_tag_id = client.get("/tags").json()[0]["id"]
+
+    connection = get_connection()
+    try:
+        connection.execute(
+            "INSERT INTO users (id, google_sub, email, name, picture) "
+            "VALUES (2, 'other-sub', 'other@example.com', 'Other', NULL)"
+        )
+        cursor = connection.execute(
+            "INSERT INTO books (user_id, title, shelf, details_pending, identity_key) "
+            "VALUES (2, 'Dune', 'reading', 0, 'isbn:9780441013593')"
+        )
+        connection.execute(
+            "INSERT INTO book_tags (book_id, tag_id) VALUES (?, ?)",
+            (cursor.lastrowid, shared_tag_id),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    tags = {tag["name"]: tag["count"] for tag in client.get("/tags").json()}
+
+    assert tags == {"Sci-Fi & Fantasy": 1}
 
 
 def test_tagging_a_missing_book_returns_404(client) -> None:

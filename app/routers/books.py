@@ -96,6 +96,66 @@ def _normalise_tag_names(raw: list[str]) -> list[str]:
     return names
 
 
+def _replace_book_tags(
+    connection: sqlite3.Connection, book_id: int, names: list[str]
+) -> None:
+    """Set a book's tags to exactly ``names``, reusing tags and pruning orphans.
+
+    Tag rows are shared across books and matched case-insensitively, so an
+    existing tag is reused rather than duplicated, and a tag left on no book is
+    deleted. The caller commits; this leaves the transaction open so an add can
+    apply categories in the same unit of work that created the book.
+    """
+    connection.execute("DELETE FROM book_tags WHERE book_id = ?", (book_id,))
+    for name in names:
+        row = connection.execute(
+            "SELECT id FROM tags WHERE name = ? COLLATE NOCASE", (name,)
+        ).fetchone()
+        if row is None:
+            cursor = connection.execute("INSERT INTO tags (name) VALUES (?)", (name,))
+            tag_id = cursor.lastrowid
+        else:
+            tag_id = row["id"]
+        connection.execute(
+            "INSERT INTO book_tags (book_id, tag_id) VALUES (?, ?)",
+            (book_id, tag_id),
+        )
+    connection.execute(
+        "DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM book_tags)"
+    )
+
+
+def _auto_categorize(
+    connection: sqlite3.Connection, book_id: int, isbn: str | None
+) -> None:
+    """Best-effort: file a newly added book under its broad catalogue categories.
+
+    The same category suggestions the tag editor offers are applied
+    automatically, so a fresh library is browsable by category and has something
+    for recommendations to work from without any manual tagging. A slow or
+    offline catalogue simply leaves the book untagged; this never fails the add.
+    Only called for a freshly created book, so it never overwrites tags a reader
+    set by hand.
+    """
+    if not isbn:
+        return
+    try:
+        categories = tag_suggestions(isbn)
+        if categories:
+            _replace_book_tags(connection, book_id, categories)
+            connection.commit()
+    except Exception:
+        # Categorisation is a bonus on top of an already-saved book: a slow or
+        # failed catalogue call, or a transient database lock while writing the
+        # tags, must never turn a successful add into a 500. Roll back only the
+        # partial tag writes -- the book row was committed by ``save_book``.
+        logger.warning("Auto-categorisation failed for %r", isbn, exc_info=True)
+        try:
+            connection.rollback()
+        except Exception:
+            pass
+
+
 def fetch_book(
     connection: sqlite3.Connection, book_id: int, user_id: int
 ) -> sqlite3.Row:
@@ -305,6 +365,13 @@ def create_book(
                 "book": book,
             },
         )
+    _auto_categorize(connection, book["id"], details.isbn)
+    try:
+        book["tags"] = _tags_for_books(connection, [book["id"]]).get(book["id"], [])
+    except Exception:
+        # The book is saved; a failed tag read must not fail the add.
+        logger.warning("Reading tags failed for book %s", book["id"], exc_info=True)
+        book["tags"] = []
     return book
 
 
@@ -319,23 +386,7 @@ def update_book_tags(
     fetch_book(connection, book_id, user["id"])
     names = _normalise_tag_names(payload.tags)
 
-    connection.execute("DELETE FROM book_tags WHERE book_id = ?", (book_id,))
-    for name in names:
-        row = connection.execute(
-            "SELECT id FROM tags WHERE name = ? COLLATE NOCASE", (name,)
-        ).fetchone()
-        if row is None:
-            cursor = connection.execute("INSERT INTO tags (name) VALUES (?)", (name,))
-            tag_id = cursor.lastrowid
-        else:
-            tag_id = row["id"]
-        connection.execute(
-            "INSERT INTO book_tags (book_id, tag_id) VALUES (?, ?)",
-            (book_id, tag_id),
-        )
-    connection.execute(
-        "DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM book_tags)"
-    )
+    _replace_book_tags(connection, book_id, names)
     connection.commit()
 
     book = row_to_book(fetch_book(connection, book_id, user["id"]))

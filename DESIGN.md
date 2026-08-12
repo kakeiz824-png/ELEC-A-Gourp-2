@@ -222,6 +222,19 @@ Early recommendations can use the same author or Open Library subjects. The prod
 must not label these as "people who liked this also liked" until real user-interaction
 data exists.
 
+`GET /recommendations` implements this content-based first step. A book is auto-filed
+on add under a small set of broad categories (the `suggest_categories` mapping over
+Open Library subjects), and the reader's own finished and reading books are ranked by
+those categories, weighting finished above reading. The top categories drive a subject
+search for other books, excluding any the reader already tracks. The evidence is the
+reader's own shelves and the catalogue's subject index, so the interface says
+"Because you read Sci-Fi & Fantasy" and never "people who liked this also liked". It is
+best-effort: no categorised reading, only free-form tags, or an offline catalogue all
+yield an empty strip rather than an error, and the strip stays hidden. Like the
+category suggestions it builds on, the subject search talks to the direct Open Library
+client only, because the seed carries no subjects and the MCP tools do not expose a
+subject index.
+
 ### 7.6 The user says whether they typed a title or an author
 
 The search box is paired with a Title/Author selector. The server is told which index
@@ -360,6 +373,7 @@ independently, since the identity guard is `(user_id, identity_key)`.
 | `GET` | `/books/{id}/reviews` | List reviews for a book |
 | `POST` | `/books/{id}/reviews` | Create or update the personal rating and review |
 | `GET` | `/authors` | Return one author's profile for `?name=`; `found=false` with null fields when none is available |
+| `GET` | `/recommendations` | Suggest unread books in the categories the caller reads most (`?limit=`); content-based, best-effort, empty when there is nothing to suggest |
 | `GET` | `/stats` | Return counts and average rating |
 
 M1 does not provide a general `PATCH /books/{id}` endpoint or separate update/delete
@@ -533,11 +547,15 @@ app/
   openlibrary.py
   routers/
     __init__.py
+    authors.py
     books.py
+    recommendations.py
     reviews.py
+    tags.py
   services/
     __init__.py
     books.py
+    recommendations.py
     reviews.py
     search.py
     stats.py
@@ -557,7 +575,9 @@ tests/
   test_mcp_client.py
   test_mcp_server.py
   test_openlibrary.py
+  test_recommendations.py
   test_reviews.py
+  test_tags.py
 mcp_server/
   __init__.py
   server.py

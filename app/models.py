@@ -125,3 +125,20 @@ class BookTagsUpdate(BaseModel):
     """The complete set of tags for one book; replaces any existing tags."""
 
     tags: list[str] = []
+
+
+class Recommendation(BaseModel):
+    """One suggested book plus the read category that prompted it.
+
+    ``category`` is one of the broad categories the reader's own finished and
+    reading books fall under, so the interface can explain *why* a book is being
+    suggested ("Because you read Sci-Fi & Fantasy"). An ISBN is always present:
+    a recommendation the reader could not add would be pointless.
+    """
+
+    title: str
+    author: str | None
+    isbn: str
+    cover_url: str | None
+    year: int | None
+    category: str

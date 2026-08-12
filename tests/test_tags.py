@@ -1,6 +1,10 @@
 """Tag endpoint tests: setting, listing, filtering, validation, and cleanup."""
 
+import sqlite3
+
 import httpx
+
+import app.routers.books as books_router
 
 
 def _add(client, title: str, shelf: str = "reading") -> dict:
@@ -130,3 +134,106 @@ def test_tag_suggestions_are_empty_when_the_catalogue_is_offline(client) -> None
 
 def test_tag_suggestions_for_a_missing_book_return_404(client) -> None:
     assert client.get("/books/9999/tag-suggestions").status_code == 404
+
+
+def test_adding_a_book_auto_applies_catalogue_categories(
+    client, mock_openlibrary
+) -> None:
+    """A newly added book is filed under its broad categories automatically."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/api/books" in url:
+            # Confirming the submitted ISBN before it is stored.
+            return httpx.Response(
+                200,
+                json={
+                    "ISBN:9780261103344": {
+                        "title": "The Hobbit",
+                        "authors": [{"name": "J. R. R. Tolkien"}],
+                    }
+                },
+            )
+        # The subject lookup behind the category suggestions.
+        return httpx.Response(
+            200, json={"numFound": 1, "docs": [{"subject": ["Science fiction"]}]}
+        )
+
+    mock_openlibrary(handler)
+
+    resp = client.post(
+        "/books", json={"title": "The Hobbit", "isbn": "9780261103344"}
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["tags"] == ["Sci-Fi & Fantasy"]
+
+
+def test_auto_categorisation_never_blocks_an_add(client, mock_openlibrary) -> None:
+    """If the subject lookup fails, the book is still added, just untagged."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/api/books" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "ISBN:9780261103344": {
+                        "title": "The Hobbit",
+                        "authors": [{"name": "J. R. R. Tolkien"}],
+                    }
+                },
+            )
+        raise httpx.ConnectError("subject index timeout")
+
+    mock_openlibrary(handler)
+
+    resp = client.post(
+        "/books", json={"title": "The Hobbit", "isbn": "9780261103344"}
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["tags"] == []
+
+
+def test_a_tag_write_failure_does_not_fail_the_add(
+    client, mock_openlibrary, monkeypatch
+) -> None:
+    """A database error while writing auto-categories still leaves the book added.
+
+    Reproduces the regression where the tag write sat outside the best-effort
+    guard, so a transient lock during categorisation turned a successful add
+    into a 500.
+    """
+
+    def boom(connection, book_id, names):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(books_router, "_replace_book_tags", boom)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/api/books" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "ISBN:9780261103344": {
+                        "title": "The Hobbit",
+                        "authors": [{"name": "J. R. R. Tolkien"}],
+                    }
+                },
+            )
+        return httpx.Response(
+            200, json={"numFound": 1, "docs": [{"subject": ["Science fiction"]}]}
+        )
+
+    mock_openlibrary(handler)
+
+    resp = client.post(
+        "/books", json={"title": "The Hobbit", "isbn": "9780261103344"}
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["tags"] == []
+    # The book really is stored, not just reported as added.
+    assert len(client.get("/books").json()) == 1

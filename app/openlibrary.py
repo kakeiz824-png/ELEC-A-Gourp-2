@@ -28,6 +28,7 @@ from app.details import (
     cover_url_by_id,
     cover_url_by_isbn,
     normalise,
+    normalise_isbn,
     year_from,
 )
 
@@ -536,6 +537,34 @@ def subjects_for_isbn(isbn: str) -> list[str]:
         if len(subjects) >= MAX_SUBJECTS:
             break
     return subjects
+
+
+def find_similar_books(
+    isbn: str, *, limit: int = SEARCH_LIMIT, offset: int = 0
+) -> SearchPage:
+    """Books that share a subject with the given ISBN, best match first.
+
+    The book's own subjects are resolved first, then the most relevant one is
+    searched, with the book itself dropped from the results so a reader is never
+    recommended the book they started from. A book the catalogue files under no
+    usable subject -- or an ISBN it does not know -- yields an empty page rather
+    than an error, exactly like ``subjects_for_isbn``. Only the subject search
+    can raise ``LookupUnavailable``, so a genuine outage there still surfaces as
+    one for the caller to treat as such.
+    """
+    key = isbn.strip().replace("-", "").replace(" ", "")
+    if not key:
+        return SearchPage(results=[], total=0)
+
+    subjects = subjects_for_isbn(key)
+    if not subjects:
+        return SearchPage(results=[], total=0)
+
+    # Fetch one extra so dropping the book itself still leaves a full page.
+    page = search_by_subject(subjects[0], limit=limit + 1, offset=offset)
+    source = normalise_isbn(key)
+    similar = [book for book in page.results if normalise_isbn(book.isbn) != source]
+    return SearchPage(results=similar[:limit], total=page.total)
 
 
 def _text(value: object) -> str | None:

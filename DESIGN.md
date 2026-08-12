@@ -459,8 +459,9 @@ and cover identifiers.
 
 Studio 5 requires the team to design 5-10 AI-facing tool signatures and implement
 at least one tool end to end. The implemented Shelf Life catalogue tools are
-`search_book`, `search_by_author`, and `get_book_details`; the remaining signatures
-are planned and must not be described as implemented until their code and tests
+`search_book`, `search_by_author`, `get_book_details`, `get_author_details`,
+`search_by_subject`, and `find_similar_books`; the remaining signatures are
+planned and must not be described as implemented until their code and tests
 exist.
 
 | Tool | When the AI should use it | Parameters | Returns |
@@ -469,6 +470,8 @@ exist.
 | `search_by_author` | The user names a writer rather than a book and wants the books that writer wrote. | `author: str`, `limit: int = 5`, `offset: int = 0` | One page of normalized Open Library matches, and the total match count. |
 | `get_book_details` | The user provides an ISBN, or has selected one search result and wants that edition's details. | `isbn: str` | Title, author, year, ISBN, and cover for that one book. |
 | `get_author_details` | The user wants to know about a writer -- biography and life dates -- rather than a list of their books. | `name: str` | Name, biography, birth/death dates, and photo when the catalogue has them. |
+| `search_by_subject` | The user names a genre, topic, or category and wants books on it. | `subject: str`, `limit: int = 5`, `offset: int = 0` | One page of normalized Open Library matches, and the total match count. |
+| `find_similar_books` | The user has one book's ISBN and wants more like it. | `isbn: str`, `limit: int = 5`, `offset: int = 0` | One page of books sharing a subject with that book, excluding the book itself. |
 | `list_shelf` | The user asks what is currently on one personal shelf. | `shelf: str` | Books on Reading, Finished, Wishlist, or all shelves. |
 | `get_reading_stats` | The user asks for totals, progress, reviews, or average rating. | none | Current shelf counts, review count, and average rating. |
 | `add_book` | The user explicitly asks to save a title to their tracker. | `title: str`, `shelf: str = "reading"` | The stored book and selected shelf. |

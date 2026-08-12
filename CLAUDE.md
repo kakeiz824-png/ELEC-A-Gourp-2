@@ -298,8 +298,8 @@ MCP clients launch the server as a STDIO subprocess:
 ```
 
 The terminal waits silently for an MCP client; this command does not open a web
-page. The server exposes `search_book`, `search_by_author`, `get_book_details`, and
-`get_author_details`.
+page. The server exposes `search_book`, `search_by_author`, `get_book_details`,
+`get_author_details`, `search_by_subject`, and `find_similar_books`.
 
 ### Optional configuration
 
@@ -387,8 +387,8 @@ URL. Tests never contact Google: they override the `get_current_user` /
 
 ### Maintain the MCP server
 
-1. Keep the tested `search_book`, `search_by_author`, `get_book_details`, and
-   `get_author_details` tools stable.
+1. Keep the tested `search_book`, `search_by_author`, `get_book_details`,
+   `get_author_details`, `search_by_subject`, and `find_similar_books` tools stable.
 2. Reuse the existing normalization and failure-handling rules.
 3. Keep the MCP client connected through the `lookup` module, never directly from a
    router.

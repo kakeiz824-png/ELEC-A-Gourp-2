@@ -1,4 +1,4 @@
-authlib==1.3.2
+authlib==1.6.11
 fastapi==0.139.2
 fastmcp==3.4.5
 httpx==0.28.1

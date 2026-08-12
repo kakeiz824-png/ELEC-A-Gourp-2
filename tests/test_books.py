@@ -22,7 +22,7 @@ def test_home_page_renders_three_shelves(client) -> None:
     assert "Reading" in response.text
     assert "Finished" in response.text
     assert "Wishlist" in response.text
-    assert "/static/app.js?v=20260811-tags-categories" in response.text
+    assert "/static/app.js?v=20260812-google-login-tags" in response.text
     assert 'id="tag-bar"' in response.text
     assert 'id="shelf-select"' not in response.text
     assert 'class="search-result-shelf"' in response.text
@@ -244,8 +244,8 @@ def test_a_legacy_pending_book_can_be_enriched_later(client) -> None:
     try:
         cursor = connection.execute(
             """
-            INSERT INTO books (title, shelf, details_pending, identity_key)
-            VALUES ('The Hobbit', 'reading', 1, 'legacy:test-pending')
+            INSERT INTO books (user_id, title, shelf, details_pending, identity_key)
+            VALUES (1, 'The Hobbit', 'reading', 1, 'legacy:test-pending')
             """
         )
         connection.commit()

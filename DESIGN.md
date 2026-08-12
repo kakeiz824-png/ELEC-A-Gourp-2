@@ -299,11 +299,23 @@ Grouping them would make the result list easier to scan.
 
 ## 9. Data Model
 
+### User
+
+| Field | Type | Rules |
+|---|---|---|
+| `id` | Integer | Primary key |
+| `google_sub` | Text | Google subject id; unique, keys the row on sign-in |
+| `email` | Text | From the Google profile |
+| `name` | Text or null | Display name from the Google profile |
+| `picture` | Text or null | Avatar URL from the Google profile |
+| `created_at` | Text timestamp | Assigned by SQLite |
+
 ### Book
 
 | Field | Type | Rules |
 |---|---|---|
 | `id` | Integer | Primary key |
+| `user_id` | Integer | Owner; foreign key to User, cascade on delete |
 | `title` | Text | Required, 1-300 characters after trimming |
 | `author` | Text or null | Filled by lookup when available |
 | `isbn` | Text or null | Required for new books; null is retained only for legacy compatibility |
@@ -311,7 +323,7 @@ Grouping them would make the result list easier to scan.
 | `year` | Integer or null | First publication year when available |
 | `shelf` | Text | `reading`, `finished`, or `wishlist` |
 | `details_pending` | Integer/Boolean | True when details still need enrichment |
-| `identity_key` | Text | Internal normalized ISBN, unique across tracked books |
+| `identity_key` | Text | Internal normalized ISBN, unique per user (`(user_id, identity_key)`) |
 | `created_at` | Text timestamp | Assigned by SQLite |
 
 ### Review
@@ -326,8 +338,11 @@ Grouping them would make the result list easier to scan.
 
 ### Relationship
 
-In the current single-user application, one Book has zero or one Review. A later
-submission updates the existing Review. A Review belongs to exactly one Book.
+Each Book belongs to exactly one User, and all book, review, and stats queries
+are scoped to the signed-in user's rows. One Book has zero or one Review; a later
+submission updates the existing Review. A Review belongs to exactly one Book (and
+so, transitively, to that Book's owner). Two users may each track the same ISBN
+independently, since the identity guard is `(user_id, identity_key)`.
 
 ## 10. Current API
 

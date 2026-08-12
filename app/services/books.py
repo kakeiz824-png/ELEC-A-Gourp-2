@@ -17,19 +17,22 @@ class BookWriteResult:
 def save_book(
     connection: sqlite3.Connection,
     *,
+    user_id: int,
     shelf: str,
     details: BookDetails,
 ) -> BookWriteResult:
-    """Create one tracked book or return the existing ISBN match.
+    """Create one tracked book for the user, or return their existing ISBN match.
 
-    The database unique index is the final guard, so simultaneous requests from
-    separate browser tabs cannot create duplicate rows.
+    The database unique index on ``(user_id, identity_key)`` is the final guard,
+    so simultaneous requests from separate browser tabs cannot create duplicate
+    rows, and two users can each track the same ISBN independently.
     """
     normalized_isbn = normalise_isbn(details.isbn)
     if normalized_isbn is None:
         raise ValueError("A book must have an ISBN before it can be stored")
     identity_key = f"isbn:{normalized_isbn}"
     values = (
+        user_id,
         details.title,
         details.author,
         normalized_isbn,
@@ -44,10 +47,10 @@ def save_book(
         cursor = connection.execute(
             """
             INSERT INTO books (
-                title, author, isbn, cover_url, year, shelf,
+                user_id, title, author, isbn, cover_url, year, shelf,
                 details_pending, identity_key
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             values,
         )
@@ -61,7 +64,8 @@ def save_book(
     except sqlite3.IntegrityError:
         connection.rollback()
         row = connection.execute(
-            "SELECT * FROM books WHERE identity_key = ?", (identity_key,)
+            "SELECT * FROM books WHERE user_id = ? AND identity_key = ?",
+            (user_id, identity_key),
         ).fetchone()
         if row is None:
             raise

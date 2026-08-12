@@ -714,3 +714,59 @@ button.ghost.danger {
     padding: 48px 0 32px;
   }
 }
+
+/* --- Accounts and sign-in --------------------------------------------- */
+
+.account {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.account-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.account-name {
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+a.ghost {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: 8px;
+}
+
+.signin-gate {
+  padding: 96px 0 64px;
+  max-width: 560px;
+}
+
+.signin-gate h1 {
+  margin: 0 0 16px;
+}
+
+.signin-button {
+  display: inline-block;
+  margin-top: 24px;
+  padding: 12px 22px;
+  border-radius: 10px;
+  color: white;
+  background: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.signin-button:hover {
+  background: var(--accent-dark);
+}

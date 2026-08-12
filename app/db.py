@@ -22,8 +22,18 @@ USE_TURSO = bool(TURSO_DATABASE_URL)
 SHELVES = ("reading", "finished", "wishlist")
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id         INTEGER PRIMARY KEY,
+    google_sub TEXT NOT NULL UNIQUE,
+    email      TEXT NOT NULL,
+    name       TEXT,
+    picture    TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS books (
     id              INTEGER PRIMARY KEY,
+    user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,
     title           TEXT NOT NULL,
     author          TEXT,
     isbn            TEXT,
@@ -60,6 +70,8 @@ CREATE INDEX IF NOT EXISTS idx_books_shelf ON books(shelf);
 CREATE INDEX IF NOT EXISTS idx_reviews_book_id ON reviews(book_id);
 CREATE INDEX IF NOT EXISTS idx_book_tags_tag_id ON book_tags(tag_id);
 """
+# The books(user_id) index is created after the column is ensured, so a legacy
+# database (whose books table predates the column) can still run this schema.
 
 
 def _ensure_book_identity_column(connection: sqlite3.Connection) -> None:
@@ -69,6 +81,32 @@ def _ensure_book_identity_column(connection: sqlite3.Connection) -> None:
     }
     if "identity_key" not in columns:
         connection.execute("ALTER TABLE books ADD COLUMN identity_key TEXT")
+
+
+def _ensure_book_user_column(connection: sqlite3.Connection) -> None:
+    """Add the owner column when opening a database made before login existed."""
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(books)").fetchall()
+    }
+    if "user_id" not in columns:
+        connection.execute(
+            "ALTER TABLE books ADD COLUMN user_id INTEGER REFERENCES users(id)"
+        )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_books_user ON books(user_id)"
+    )
+
+
+def _drop_pre_login_books(connection: sqlite3.Connection) -> None:
+    """Remove the old single-shared shelf so login starts each user empty.
+
+    Before Shelf Life had accounts every book was globally shared and carried no
+    owner. Those rows have ``user_id IS NULL``; delete them (their reviews go
+    with them through the foreign key) so the library becomes strictly per-user.
+    New rows always set ``user_id``, so this only ever affects legacy data and is
+    safe to run on every startup.
+    """
+    connection.execute("DELETE FROM books WHERE user_id IS NULL")
 
 
 def _migrate_unique_books(connection: sqlite3.Connection) -> None:
@@ -83,13 +121,16 @@ def _migrate_unique_books(connection: sqlite3.Connection) -> None:
     _ensure_book_identity_column(connection)
     connection.execute("DROP INDEX IF EXISTS uq_books_identity")
     rows = connection.execute("SELECT * FROM books ORDER BY id").fetchall()
-    groups: dict[str, list[sqlite3.Row]] = {}
+    # Duplicates only collide within one owner: two users may each track the same
+    # ISBN, so the group key is (user_id, identity) and the unique index below is
+    # composite. ``key`` still stores the plain identity string in the column.
+    groups: dict[tuple, list[sqlite3.Row]] = {}
     for row in rows:
         isbn = normalise_isbn(row["isbn"])
         key = f"isbn:{isbn}" if isbn else f"legacy:{row['id']}"
-        groups.setdefault(key, []).append(row)
+        groups.setdefault((row["user_id"], key), []).append(row)
 
-    for key, duplicates in groups.items():
+    for (_user_id, key), duplicates in groups.items():
         keeper = duplicates[0]
         duplicate_ids = [row["id"] for row in duplicates]
         placeholders = ", ".join("?" for _ in duplicate_ids)
@@ -159,7 +200,7 @@ def _migrate_unique_books(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS uq_books_identity
-        ON books(identity_key)
+        ON books(user_id, identity_key)
         """
     )
 
@@ -334,6 +375,8 @@ def init_db() -> None:
     connection = get_connection()
     try:
         connection.executescript(SCHEMA)
+        _ensure_book_user_column(connection)
+        _drop_pre_login_books(connection)
         _migrate_unique_books(connection)
         _migrate_single_user_reviews(connection)
         connection.commit()

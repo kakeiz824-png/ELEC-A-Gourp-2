@@ -10,7 +10,7 @@
     <title>{{ app_name }}</title>
     <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=20260811-tags" />
     <script
-      src="{{ url_for('static', path='/app.js') }}?v=20260811-tags-categories"
+      src="{{ url_for('static', path='/app.js') }}?v=20260812-google-login-tags"
       defer
     ></script>
   </head>
@@ -21,8 +21,30 @@
           <span class="brand-mark" aria-hidden="true">SL</span>
           <span>{{ app_name }}</span>
         </a>
-        <span class="status" id="api-status">Checking API…</span>
+        {% if user %}
+        <div class="account">
+          <span class="status" id="api-status">Checking API…</span>
+          {% if user.picture %}
+          <img class="account-avatar" src="{{ user.picture }}" alt="" />
+          {% endif %}
+          <span class="account-name">{{ user.name or user.email }}</span>
+          <a class="ghost account-signout" href="/logout">Sign out</a>
+        </div>
+        {% else %}
+        <a class="ghost account-signin" href="/login">Sign in with Google</a>
+        {% endif %}
       </nav>
+
+      {% if not user %}
+      <section class="signin-gate" aria-label="Sign in">
+        <h1>Your reading, on three shelves.</h1>
+        <p class="intro">
+          Sign in with your Google account to build your own private shelves of
+          books to read, finish, and wish for.
+        </p>
+        <a class="signin-button" href="/login">Sign in with Google</a>
+      </section>
+      {% else %}
 
       <section class="hero">
         <p class="eyebrow">Type a title. Keep the rest.</p>
@@ -126,6 +148,7 @@
           </p>
         </section>
       </section>
+      {% endif %}
     </main>
 
     <datalist id="tag-options"></datalist>

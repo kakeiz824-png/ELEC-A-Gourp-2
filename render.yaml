@@ -8,7 +8,9 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     # Bind to 0.0.0.0 and the port Render injects via $PORT (never hardcode it).
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # --proxy-headers lets url_for build correct https callback URLs behind the
+    # Render proxy; the OAuth redirect URI is also set explicitly below.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
@@ -21,3 +23,17 @@ services:
         sync: false
       - key: TURSO_AUTH_TOKEN
         sync: false
+      # Google OAuth (from Google Cloud Console → Credentials). Set in dashboard.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      # Random string that signs the session cookie. Generate once, keep stable.
+      - key: SESSION_SECRET
+        sync: false
+      # Explicit https callback, e.g. https://shelf-life.onrender.com/auth/callback
+      - key: OAUTH_REDIRECT_URI
+        sync: false
+      # Send the session cookie only over HTTPS in production.
+      - key: SESSION_HTTPS_ONLY
+        value: "1"

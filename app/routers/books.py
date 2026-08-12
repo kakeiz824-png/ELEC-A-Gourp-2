@@ -5,6 +5,7 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.auth import get_current_user
 from app.db import get_db
 from app.details import normalise_isbn
 from app.lookup import BookDetails, details_for_isbn, lookup, tag_suggestions
@@ -31,6 +32,7 @@ def row_to_book(row: sqlite3.Row) -> dict:
     """Turn a ``books`` row into the shape the API returns."""
     book = dict(row)
     book.pop("identity_key", None)
+    book.pop("user_id", None)
     book["details_pending"] = bool(book["details_pending"])
     return book
 
@@ -94,9 +96,17 @@ def _normalise_tag_names(raw: list[str]) -> list[str]:
     return names
 
 
-def fetch_book(connection: sqlite3.Connection, book_id: int) -> sqlite3.Row:
-    """Return a book row or raise 404."""
-    row = connection.execute("SELECT * FROM books WHERE id = ?", (book_id,)).fetchone()
+def fetch_book(
+    connection: sqlite3.Connection, book_id: int, user_id: int
+) -> sqlite3.Row:
+    """Return one of the user's books or raise 404.
+
+    Scoping by ``user_id`` means another user's book id is indistinguishable from
+    a missing one, so a caller can neither read nor act on books they do not own.
+    """
+    row = connection.execute(
+        "SELECT * FROM books WHERE id = ? AND user_id = ?", (book_id, user_id)
+    ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Book not found")
     return row
@@ -142,17 +152,23 @@ def confirm_isbn(isbn: str) -> BookDetails | None:
 def list_books(
     shelf: Shelf | None = Query(default=None, description="Filter by shelf"),
     tag: str | None = Query(default=None, description="Filter by tag name"),
+    user: dict = Depends(get_current_user),
     connection: sqlite3.Connection = Depends(get_db),
 ) -> list[dict]:
-    """List books, newest first, optionally filtered to one shelf or tag."""
+    """List the user's books, newest first, optionally filtered to one shelf or tag."""
     if shelf is None and tag is None:
         rows = connection.execute(
-            "SELECT * FROM books ORDER BY created_at DESC, id DESC"
+            "SELECT * FROM books WHERE user_id = ? ORDER BY created_at DESC, id DESC",
+            (user["id"],),
         ).fetchall()
     elif tag is None:
         rows = connection.execute(
-            "SELECT * FROM books WHERE shelf = ? ORDER BY created_at DESC, id DESC",
-            (shelf,),
+            """
+            SELECT * FROM books
+            WHERE user_id = ? AND shelf = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (user["id"], shelf),
         ).fetchall()
     elif shelf is None:
         rows = connection.execute(
@@ -161,10 +177,10 @@ def list_books(
             FROM books b
             JOIN book_tags bt ON bt.book_id = b.id
             JOIN tags t ON t.id = bt.tag_id
-            WHERE t.name = ? COLLATE NOCASE
+            WHERE b.user_id = ? AND t.name = ? COLLATE NOCASE
             ORDER BY b.created_at DESC, b.id DESC
             """,
-            (tag,),
+            (user["id"], tag),
         ).fetchall()
     else:
         rows = connection.execute(
@@ -173,10 +189,10 @@ def list_books(
             FROM books b
             JOIN book_tags bt ON bt.book_id = b.id
             JOIN tags t ON t.id = bt.tag_id
-            WHERE t.name = ? COLLATE NOCASE AND b.shelf = ?
+            WHERE b.user_id = ? AND t.name = ? COLLATE NOCASE AND b.shelf = ?
             ORDER BY b.created_at DESC, b.id DESC
             """,
-            (tag, shelf),
+            (user["id"], tag, shelf),
         ).fetchall()
 
     tags = _tags_for_books(connection, [row["id"] for row in rows])
@@ -201,6 +217,7 @@ def search_books(
         le=search.MAX_PER_PAGE,
         description="Candidates per page",
     ),
+    user: dict = Depends(get_current_user),
 ) -> dict:
     """Return one page of selectable candidates without storing anything.
 
@@ -232,16 +249,17 @@ def search_books(
 @router.get("/recent", response_model=list[Book])
 def recent_books(
     limit: int = Query(default=5, ge=1, le=50, description="How many to return"),
+    user: dict = Depends(get_current_user),
     connection: sqlite3.Connection = Depends(get_db),
 ) -> list[dict]:
-    """List the most recently added books, newest first.
+    """List the user's most recently added books, newest first.
 
     Declared before ``/{book_id}`` so the literal path ``/books/recent`` is not
     captured as a book id.
     """
     rows = connection.execute(
-        "SELECT * FROM books ORDER BY created_at DESC, id DESC LIMIT ?",
-        (limit,),
+        "SELECT * FROM books WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+        (user["id"], limit),
     ).fetchall()
     return [row_to_book(row) for row in rows]
 
@@ -249,9 +267,10 @@ def recent_books(
 @router.post("", response_model=Book, status_code=status.HTTP_201_CREATED)
 def create_book(
     payload: BookCreate,
+    user: dict = Depends(get_current_user),
     connection: sqlite3.Connection = Depends(get_db),
 ) -> dict:
-    """Add the ISBN candidate selected by the user."""
+    """Add the ISBN candidate the user selected to their library."""
     if payload.isbn:
         details = confirm_isbn(payload.isbn)
     else:
@@ -267,6 +286,7 @@ def create_book(
         )
     result = save_book(
         connection,
+        user_id=user["id"],
         shelf=payload.shelf,
         details=details,
     )
@@ -292,10 +312,11 @@ def create_book(
 def update_book_tags(
     book_id: int,
     payload: BookTagsUpdate,
+    user: dict = Depends(get_current_user),
     connection: sqlite3.Connection = Depends(get_db),
 ) -> dict:
-    """Replace a book's tags with the supplied set, cleaning up orphan tags."""
-    fetch_book(connection, book_id)
+    """Replace one of the user's book's tags with the supplied set, cleaning up orphans."""
+    fetch_book(connection, book_id, user["id"])
     names = _normalise_tag_names(payload.tags)
 
     connection.execute("DELETE FROM book_tags WHERE book_id = ?", (book_id,))
@@ -317,7 +338,7 @@ def update_book_tags(
     )
     connection.commit()
 
-    book = row_to_book(fetch_book(connection, book_id))
+    book = row_to_book(fetch_book(connection, book_id, user["id"]))
     book["tags"] = _tags_for_books(connection, [book_id]).get(book_id, [])
     return book
 
@@ -325,10 +346,11 @@ def update_book_tags(
 @router.get("/{book_id}/tag-suggestions")
 def book_tag_suggestions(
     book_id: int,
+    user: dict = Depends(get_current_user),
     connection: sqlite3.Connection = Depends(get_db),
 ) -> dict[str, list[str]]:
     """Broad category suggestions from the catalogue for the tag editor."""
-    row = fetch_book(connection, book_id)
+    row = fetch_book(connection, book_id, user["id"])
     if not row["isbn"]:
         return {"categories": []}
     return {"categories": tag_suggestions(row["isbn"])}
@@ -337,10 +359,11 @@ def book_tag_suggestions(
 @router.get("/{book_id}", response_model=BookWithReviews)
 def get_book(
     book_id: int,
+    user: dict = Depends(get_current_user),
     connection: sqlite3.Connection = Depends(get_db),
 ) -> dict:
-    """Get one book together with its reviews."""
-    book = row_to_book(fetch_book(connection, book_id))
+    """Get one of the user's books together with its reviews."""
+    book = row_to_book(fetch_book(connection, book_id, user["id"]))
     rows = connection.execute(
         "SELECT * FROM reviews WHERE book_id = ? ORDER BY created_at DESC, id DESC",
         (book_id,),
@@ -354,24 +377,27 @@ def get_book(
 def move_book(
     book_id: int,
     payload: ShelfUpdate,
+    user: dict = Depends(get_current_user),
     connection: sqlite3.Connection = Depends(get_db),
 ) -> dict:
-    """Move a book to another shelf."""
-    fetch_book(connection, book_id)
+    """Move one of the user's books to another shelf."""
+    fetch_book(connection, book_id, user["id"])
     connection.execute(
-        "UPDATE books SET shelf = ? WHERE id = ?", (payload.shelf, book_id)
+        "UPDATE books SET shelf = ? WHERE id = ? AND user_id = ?",
+        (payload.shelf, book_id, user["id"]),
     )
     connection.commit()
-    return row_to_book(fetch_book(connection, book_id))
+    return row_to_book(fetch_book(connection, book_id, user["id"]))
 
 
 @router.post("/{book_id}/enrich", response_model=Book)
 def enrich_book(
     book_id: int,
+    user: dict = Depends(get_current_user),
     connection: sqlite3.Connection = Depends(get_db),
 ) -> dict:
-    """Retry the lookup for a book whose details are still pending."""
-    row = fetch_book(connection, book_id)
+    """Retry the lookup for one of the user's books whose details are pending."""
+    row = fetch_book(connection, book_id, user["id"])
     details = safe_lookup(row["title"])
     if details is None or normalise_isbn(details.isbn) is None:
         raise HTTPException(
@@ -390,7 +416,7 @@ def enrich_book(
             UPDATE books
             SET title = ?, author = ?, isbn = ?, cover_url = ?, year = ?,
                 details_pending = 0, identity_key = ?
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
             (
                 details.title,
@@ -400,13 +426,15 @@ def enrich_book(
                 details.year,
                 identity_key,
                 book_id,
+                user["id"],
             ),
         )
         connection.commit()
     except sqlite3.IntegrityError:
         connection.rollback()
         existing = connection.execute(
-            "SELECT * FROM books WHERE identity_key = ?", (identity_key,)
+            "SELECT * FROM books WHERE user_id = ? AND identity_key = ?",
+            (user["id"], identity_key),
         ).fetchone()
         if existing is None:
             raise
@@ -418,17 +446,20 @@ def enrich_book(
                 "book": row_to_book(existing),
             },
         )
-    return row_to_book(fetch_book(connection, book_id))
+    return row_to_book(fetch_book(connection, book_id, user["id"]))
 
 
 @router.delete("/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_book(
     book_id: int,
+    user: dict = Depends(get_current_user),
     connection: sqlite3.Connection = Depends(get_db),
 ) -> None:
-    """Delete a book; its reviews go with it."""
-    fetch_book(connection, book_id)
-    connection.execute("DELETE FROM books WHERE id = ?", (book_id,))
+    """Delete one of the user's books; its reviews and orphaned tags go with it."""
+    fetch_book(connection, book_id, user["id"])
+    connection.execute(
+        "DELETE FROM books WHERE id = ? AND user_id = ?", (book_id, user["id"])
+    )
     connection.execute(
         "DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM book_tags)"
     )

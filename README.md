@@ -124,6 +124,30 @@ The commands below use the virtual environment directly, so PowerShell script ac
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
+## Signing in with Google
+
+Shelf Life gives every user their own private shelves, so it needs a Google
+OAuth client. Sign-in is required — without it the home page only shows a
+sign-in prompt.
+
+1. In the [Google Cloud Console](https://console.cloud.google.com/), configure
+   the **OAuth consent screen** (User Type: External; add yourself as a test
+   user while it is in Testing).
+2. Create **Credentials → OAuth client ID → Web application**.
+3. Under **Authorized redirect URIs**, add both the local and deployed callbacks:
+   - `http://127.0.0.1:8000/auth/callback`
+   - `https://<your-deployed-host>/auth/callback`
+4. Set the environment variables before starting the server (PowerShell):
+
+   ```powershell
+   $env:GOOGLE_CLIENT_ID = "<your-client-id>"
+   $env:GOOGLE_CLIENT_SECRET = "<your-client-secret>"
+   $env:SESSION_SECRET = "<any-long-random-string>"
+   ```
+
+Never commit these values. On Render, set them (plus `OAUTH_REDIRECT_URI` and
+`SESSION_HTTPS_ONLY=1`) as dashboard environment variables.
+
 ## Running the Application
 
 Start the development server:
@@ -160,10 +184,15 @@ $env:SHELF_LIFE_LOOKUP_BACKEND = "seed"
 
 ## Configuration
 
-All configuration variables are optional.
+The Google OAuth variables are required to sign in; the rest are optional.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `GOOGLE_CLIENT_ID` | — | Google OAuth client id (required) |
+| `GOOGLE_CLIENT_SECRET` | — | Google OAuth client secret (required) |
+| `SESSION_SECRET` | random per boot | Signs the session cookie; set a stable value in production |
+| `OAUTH_REDIRECT_URI` | callback route URL | Explicit https callback for production behind a proxy |
+| `SESSION_HTTPS_ONLY` | off | Set to `1` in production so the session cookie is HTTPS-only |
 | `SHELF_LIFE_DB` | `shelf_life.db` in the repository root | SQLite database location |
 | `SHELF_LIFE_ORIGINS` | `http://127.0.0.1:8000,http://localhost:8000` | Comma-separated CORS allowlist |
 | `SHELF_LIFE_LOOKUP_BACKEND` | `mcp` | Lookup through the local MCP tools (`mcp`), the direct Open Library client (`openlibrary`, diagnostics), or the offline seed (`seed`) |

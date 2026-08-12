@@ -359,6 +359,20 @@ def author_profile(name: str) -> AuthorDetails | None:
     return value
 
 
+def tag_suggestions(isbn: str) -> list[str]:
+    """Broad category suggestions for one ISBN, best-effort.
+
+    Raw Open Library subjects are mapped into a small set of big categories so
+    the tag editor offers a handful of clear choices. The seed catalogue
+    carries no subjects and the MCP tools do not expose them, so this
+    enrichment talks to the direct Open Library client only. A missing or slow
+    catalogue yields an empty list, never an error.
+    """
+    if active_backend() == SEED_BACKEND:
+        return []
+    return openlibrary.suggest_categories(openlibrary.subjects_for_isbn(isbn))
+
+
 def lookup(title: str) -> BookDetails | None:
     """Return the best ISBN-bearing match for a title, or ``None``.
 

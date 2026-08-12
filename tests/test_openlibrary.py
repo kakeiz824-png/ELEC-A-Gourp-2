@@ -388,3 +388,64 @@ def test_timeout_ignores_a_nonsense_environment_value(monkeypatch) -> None:
 
     monkeypatch.setenv(openlibrary.TIMEOUT_ENV, "2.5")
     assert openlibrary.timeout() == 2.5
+def test_subjects_for_isbn_parses_and_cleans(mock_openlibrary) -> None:
+    """Open Library subject lists become cleaned, deduplicated suggestions."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "numFound": 1,
+                "docs": [
+                    {
+                        "subject": [
+                            "Science fiction",
+                            "Science fiction",
+                            "  Aliens  ",
+                            "fiction",
+                            "novel",
+                            "Chinese fiction",
+                        ]
+                    }
+                ],
+            },
+        )
+
+    mock_openlibrary(handler)
+
+    assert openlibrary.subjects_for_isbn("9781800249158") == [
+        "Science fiction",
+        "Aliens",
+        "Chinese fiction",
+    ]
+
+
+def test_subjects_for_isbn_returns_empty_for_no_docs(mock_openlibrary) -> None:
+    mock_openlibrary(json_route({"numFound": 0, "docs": []}))
+
+    assert openlibrary.subjects_for_isbn("9780000000000") == []
+
+
+def test_subjects_for_isbn_hides_unavailable_from_callers(mock_openlibrary) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("subjects API timeout")
+
+    mock_openlibrary(handler)
+
+    assert openlibrary.subjects_for_isbn("9781800249158") == []
+
+def test_suggest_categories_maps_subjects_to_few_broad_buckets() -> None:
+    raw = [
+        "Science fiction",
+        "Fantasy",
+        "Human-alien encounters",
+        "Chinese Science fiction",
+        "Murder mystery",
+        "History of China",
+    ]
+
+    assert openlibrary.suggest_categories(raw) == [
+        "Sci-Fi & Fantasy",
+        "Mystery & Thriller",
+        "Non-fiction",
+    ]

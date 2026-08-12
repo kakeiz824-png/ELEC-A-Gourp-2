@@ -57,6 +57,7 @@ class Book(BaseModel):
     shelf: Shelf
     details_pending: bool
     created_at: str
+    tags: list[str] = []
 
 
 class BookCandidate(BaseModel):
@@ -110,3 +111,17 @@ class Stats(BaseModel):
     by_shelf: dict[str, int]
     review_count: int
     average_rating: float | None
+
+
+class Tag(BaseModel):
+    """One tag and how many books carry it, for the filter bar."""
+
+    id: int
+    name: str
+    count: int
+
+
+class BookTagsUpdate(BaseModel):
+    """The complete set of tags for one book; replaces any existing tags."""
+
+    tags: list[str] = []

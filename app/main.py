@@ -17,7 +17,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.auth import get_current_user, optional_user
 from app.db import get_db, init_db
 from app.models import Stats
-from app.routers import auth, authors, books, reviews
+from app.routers import auth, authors, books, reviews, tags
 from app.services.stats import collect_stats
 
 
@@ -77,6 +77,7 @@ app.include_router(auth.router)
 app.include_router(books.router)
 app.include_router(reviews.router)
 app.include_router(authors.router)
+app.include_router(tags.router)
 
 
 @app.get("/", response_class=HTMLResponse)

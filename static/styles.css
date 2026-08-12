@@ -352,6 +352,135 @@ button.ghost.danger {
   font-size: 0.8rem;
 }
 
+.tag-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding-bottom: 4px;
+}
+
+.tag-chip {
+  padding: 0.35rem 0.8rem;
+  border: 1px solid #cfc5b2;
+  border-radius: 999px;
+  background: #fffdf8;
+  color: #3f3626;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.tag-chip:hover {
+  border-color: #2b5f8f;
+  color: #2b5f8f;
+}
+
+.tag-chip:focus-visible {
+  outline: 2px solid #2b5f8f;
+  outline-offset: 2px;
+}
+
+.tag-chip.active {
+  background: #2b5f8f;
+  color: #fff;
+  border-color: #2b5f8f;
+}
+
+.book-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.book-tag {
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #d9cfbc;
+  border-radius: 999px;
+  background: #f6f0e4;
+  color: #4a3f2f;
+  font-size: 0.72rem;
+}
+
+.book-tag.draft button {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  margin-left: 4px;
+  font-size: 0.8rem;
+  color: #8a7a5c;
+}
+
+.tag-edit {
+  margin: 8px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.tag-input {
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.tag-input:focus {
+  outline: 2px solid #2b5f8f;
+  outline-offset: 1px;
+}
+
+.tag-edit-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.tag-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.tag-suggestions-label {
+  width: 100%;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tag-suggestion {
+  padding: 0.35rem 0.85rem;
+  border: 1px solid #b7a98a;
+  border-radius: 999px;
+  background: #fffdf8;
+  color: #3f3626;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    transform 0.1s ease;
+}
+
+.tag-suggestion:hover {
+  background: #2b5f8f;
+  border-color: #2b5f8f;
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.tag-suggestion:focus-visible {
+  outline: 2px solid #2b5f8f;
+  outline-offset: 2px;
+}
+
 .pagination {
   display: flex;
   align-items: center;

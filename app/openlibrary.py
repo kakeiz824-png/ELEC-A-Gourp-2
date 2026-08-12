@@ -359,6 +359,138 @@ def get_book_details(isbn: str) -> BookDetails | None:
     )
 
 
+_GENERIC_SUBJECTS = {"fiction", "novel", "specimens", "tales", "stories"}
+
+# Broad categories for tag suggestions. Order matters: more specific categories
+# are checked first so "science fiction" lands in Sci-Fi & Fantasy, not in the
+# generic Fiction bucket.
+CATEGORY_KEYWORDS = {
+    "Sci-Fi & Fantasy": (
+        "science fiction",
+        "fantasy",
+        "speculative",
+        "sci-fi",
+        "space opera",
+        "dystopian",
+        "extraterrestrial",
+        "alien",
+        "time travel",
+        "magic",
+        "wizard",
+        "dragon",
+        "科幻",
+    ),
+    "Mystery & Thriller": (
+        "mystery",
+        "thriller",
+        "crime",
+        "detective",
+        "suspense",
+        "murder",
+        "spy",
+    ),
+    "Romance": ("romance", "romantic", "love stories"),
+    "Kids & YA": (
+        "juvenile",
+        "children",
+        "young adult",
+        "teen",
+        "middle grade",
+        "picture book",
+    ),
+    "Poetry & Drama": ("poetry", "poems", "drama", "plays", "verse", "theater"),
+    "Non-fiction": (
+        "history",
+        "biography",
+        "memoir",
+        "science",
+        "philosophy",
+        "politics",
+        "business",
+        "economics",
+        "self-help",
+        "psychology",
+        "sociology",
+        "religion",
+        "nature",
+        "travel",
+    ),
+    "Classics": ("classics", "classic", "canon"),
+    "Fiction & Literature": (
+        "fiction",
+        "novel",
+        "short stories",
+        "literature",
+        "stories",
+        "tales",
+        "adventure",
+    ),
+}
+
+
+def suggest_categories(subjects: list[str]) -> list[str]:
+    """Map raw Open Library subjects to a small set of broad categories.
+
+    Each subject is assigned to the first matching category in priority order;
+    once a category is already present, the subject still stops there instead
+    of cascading into a broader bucket (e.g. "science fiction" must never fall
+    through to "Non-fiction" via the word "science").
+    """
+    matched: list[str] = []
+    for subject in subjects:
+        folded = subject.casefold()
+        for category, keywords in CATEGORY_KEYWORDS.items():
+            if any(keyword in folded for keyword in keywords):
+                if category not in matched:
+                    matched.append(category)
+                break
+    return matched
+MAX_SUBJECT_LENGTH = 50
+MAX_SUBJECTS = 10
+
+
+def subjects_for_isbn(isbn: str) -> list[str]:
+    """Top cleaned subject suggestions for one ISBN, best-effort.
+
+    The books API does not return subjects, so this uses the search index (the
+    same endpoint family as the ISBN-search fallback) and never raises: a
+    missing or slow catalogue simply yields no suggestions.
+    """
+    key = isbn.strip().replace("-", "").replace(" ", "")
+    if not key:
+        return []
+    try:
+        payload = _get_json(
+            SEARCH_URL, {"q": f"isbn:{key}", "limit": 1, "fields": "subject"}
+        )
+        docs, _ = _docs(payload, "subject search")
+    except LookupUnavailable:
+        return []
+    if not docs or not isinstance(docs[0], dict):
+        return []
+
+    raw = docs[0].get("subject")
+    if not isinstance(raw, list):
+        return []
+
+    seen: set[str] = set()
+    subjects: list[str] = []
+    for value in raw:
+        if not isinstance(value, str):
+            continue
+        name = value.strip()
+        folded = name.casefold()
+        if not name or folded in seen or folded in _GENERIC_SUBJECTS:
+            continue
+        if len(name) > MAX_SUBJECT_LENGTH:
+            continue
+        seen.add(folded)
+        subjects.append(name)
+        if len(subjects) >= MAX_SUBJECTS:
+            break
+    return subjects
+
+
 def _text(value: object) -> str | None:
     """A stripped non-empty string, or ``None`` for anything else."""
     return value.strip() if isinstance(value, str) and value.strip() else None

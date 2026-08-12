@@ -12,7 +12,7 @@ import sys
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 
-from app.details import BookDetails, SearchPage
+from app.details import AuthorDetails, BookDetails, SearchPage
 from app.openlibrary import LookupUnavailable
 from mcp_server import server
 
@@ -547,6 +547,84 @@ def test_find_similar_books_hides_catalogue_failures_from_the_client(monkeypatch
 
     assert "temporarily unavailable" in text
     assert "internal network details" not in text
+
+
+def test_a_repeat_tool_call_is_served_from_the_cache(monkeypatch) -> None:
+    """The catalogue is asked once for a repeated question, not once per call."""
+    calls = {"count": 0}
+
+    def counted(title: str, **paging):
+        calls["count"] += 1
+        return SearchPage(
+            results=[BookDetails(title="The Hobbit", isbn="9780261103344")], total=1
+        )
+
+    monkeypatch.setattr(server, "search_open_library", counted)
+
+    first = call_search_book("The Hobbit")
+    second = call_search_book("  The Hobbit  ")  # same question after normalising
+
+    assert calls["count"] == 1
+    assert first == second
+
+
+def test_each_search_tool_caches_separately(monkeypatch) -> None:
+    """One string means different things to different tools, so keys must differ."""
+    seen: list[str] = []
+
+    def title_search(title: str, **paging):
+        seen.append("title")
+        return SearchPage(results=[BookDetails(title="About Orwell")], total=1)
+
+    def author_search(author: str, **paging):
+        seen.append("author")
+        return SearchPage(results=[BookDetails(title="Nineteen Eighty-Four")], total=1)
+
+    monkeypatch.setattr(server, "search_open_library", title_search)
+    monkeypatch.setattr(server, "search_open_library_author", author_search)
+
+    call_search_book("George Orwell")
+    call_search_by_author("George Orwell")
+
+    assert seen == ["title", "author"]
+
+
+def test_an_outage_is_not_cached(monkeypatch) -> None:
+    """A failed call must be retried next time, not pinned for the whole TTL."""
+    calls = {"count": 0}
+
+    def flaky(title: str, **paging):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise LookupUnavailable("timed out")
+        return SearchPage(
+            results=[BookDetails(title="The Hobbit", isbn="9780261103344")], total=1
+        )
+
+    monkeypatch.setattr(server, "search_open_library", flaky)
+
+    assert "temporarily unavailable" in call_search_book("The Hobbit")
+    recovered = call_search_book("The Hobbit")
+
+    assert calls["count"] == 2
+    assert "The Hobbit" in recovered
+
+
+def test_a_missing_author_profile_is_not_cached(monkeypatch) -> None:
+    """An empty profile is usually a timeout, so the next call asks again."""
+    calls = {"count": 0}
+
+    def flaky(name: str):
+        calls["count"] += 1
+        return None if calls["count"] == 1 else AuthorDetails(name="Ted Chiang")
+
+    monkeypatch.setattr(server, "open_library_author_details", flaky)
+
+    call_get_author_details("Ted Chiang")
+    result = call_get_author_details("Ted Chiang")
+
+    assert calls["count"] == 2
+    assert result.structured_content["status"] == "ok"
 
 
 def test_get_author_details_logs_the_exception_but_not_the_name(

@@ -7,6 +7,7 @@ from app.auth import get_current_user, optional_user
 from app.db import get_connection
 from app.lookup import clear_lookup_cache
 from app.main import app
+from mcp_server.server import clear_catalogue_cache
 
 
 # The signed-in user every test acts as. Its id matches the row seeded into each
@@ -52,10 +53,11 @@ def offline_lookup(monkeypatch):
     Two belts: the lookup backend is pinned to the seed, and the HTTP client
     factory raises if anything reaches for it anyway.  A test that wants to
     exercise the Open Library path overrides both -- see ``test_openlibrary``.
-    The live-lookup cache is cleared so a cached answer from one test can
-    never leak into another.
+    Both catalogue caches -- the lookup module's and the MCP server's -- are
+    cleared so a cached answer from one test can never leak into another.
     """
     clear_lookup_cache()
+    clear_catalogue_cache()
     monkeypatch.setenv("SHELF_LIFE_LOOKUP_BACKEND", "seed")
 
     def forbidden() -> httpx.Client:

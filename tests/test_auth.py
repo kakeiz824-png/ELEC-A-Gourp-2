@@ -105,6 +105,9 @@ def test_protected_endpoints_require_sign_in(anon_client) -> None:
     assert anon_client.get("/books").status_code == 401
     assert anon_client.get("/stats").status_code == 401
     assert anon_client.post("/books", json={"title": "The Hobbit"}).status_code == 401
+    # The filter bar describes the caller's own library, so it is private too.
+    assert anon_client.get("/tags").status_code == 401
+    assert anon_client.get("/recommendations").status_code == 401
 
 
 def test_home_shows_sign_in_when_signed_out(anon_client) -> None:

@@ -542,6 +542,7 @@ recorded.
 app/
   __init__.py
   db.py
+  cache.py
   details.py
   lookup.py
   main.py

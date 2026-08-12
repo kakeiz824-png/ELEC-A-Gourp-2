@@ -208,6 +208,7 @@ app/
   auth.py              Google OAuth client and the current-user dependency
   db.py                SQLite schema and connection helpers
   models.py            Pydantic request and response models
+  cache.py             Bounded TTL cache shared by the lookup and MCP layers
   details.py           Normalized BookDetails value type
   lookup.py            Selects MCP/direct/seed lookup and handles fallback
   mcp_client.py        Converts MCP results into BookDetails
@@ -397,10 +398,14 @@ URL. Tests never contact Google: they override the `get_current_user` /
 2. Reuse the existing normalization and failure-handling rules.
 3. Keep the MCP client connected through the `lookup` module, never directly from a
    router.
-4. Preserve the offline seed fallback.
-5. Add isolated mocked MCP tests.
-6. Run the full test suite and the required security scan.
-7. Update the architecture and running instructions only after the integration works.
+4. Keep the tools calling `app.openlibrary` directly, never `app.lookup`: with the
+   default `mcp` backend, `lookup` dispatches straight back into these tools. That
+   is why the server caches through `app.cache` itself rather than inheriting the
+   lookup module's cache.
+5. Preserve the offline seed fallback.
+6. Add isolated mocked MCP tests.
+7. Run the full test suite and the required security scan.
+8. Update the architecture and running instructions only after the integration works.
 
 ### Change the browser interface
 

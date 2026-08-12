@@ -25,9 +25,9 @@ import os
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
-from time import monotonic
 
 from app import mcp_client, openlibrary
+from app.cache import MISS, TTLCache
 from app.details import (
     AuthorDetails,
     BookDetails,
@@ -65,44 +65,14 @@ DEFAULT_BACKEND = MCP_BACKEND
 
 DEFAULT_LIMIT = 5
 
-CACHE_TTL_SECONDS = 300.0
-_MAX_CACHE_ENTRIES = 256
-_lookup_cache: dict[tuple, tuple[float, object]] = {}
+# Every cache key here starts with the active backend, so a test or demo that
+# switches backends never reads a result another backend fetched.
+_lookup_cache = TTLCache()
 
 
 def clear_lookup_cache() -> None:
     """Drop every cached live-lookup answer (test isolation, diagnostics)."""
     _lookup_cache.clear()
-
-
-def _cached_lookup(
-    key: tuple, compute: Callable[[], object], *, cache_none: bool = True
-) -> object:
-    """Return a cached live-catalogue answer, computing and storing on a miss.
-
-    The key includes the active backend, so tests and demos that switch
-    backends never read a result fetched by another backend.  A small TTL stops
-    stale metadata lingering, and the cache is bounded so a long session cannot
-    grow without limit.
-
-    ``cache_none=False`` skips storing a ``None`` result. An author profile that
-    came back empty is usually a transient timeout on a slow catalogue rather
-    than a settled "no such author", and caching it would make one slow moment
-    stick for the whole TTL; recomputing on the next request is cheap and lets a
-    recovered catalogue answer straight away.
-    """
-    now = monotonic()
-    cached = _lookup_cache.get(key)
-    if cached is not None and now - cached[0] < CACHE_TTL_SECONDS:
-        return cached[1]
-
-    value = compute()
-    if value is None and not cache_none:
-        return None
-    if len(_lookup_cache) >= _MAX_CACHE_ENTRIES:
-        _lookup_cache.clear()
-    _lookup_cache[key] = (now, value)
-    return value
 
 
 def active_backend() -> str:
@@ -216,11 +186,10 @@ def _search(
         return seed(query, limit=limit, offset=offset)
 
     cache_key = (backend, kind, normalise(query), limit, offset)
-    now = monotonic()
     cached = _lookup_cache.get(cache_key)
-    if cached is not None and now - cached[0] < CACHE_TTL_SECONDS:
-        assert isinstance(cached[1], SearchPage)
-        return cached[1]
+    if cached is not MISS:
+        assert isinstance(cached, SearchPage)
+        return cached
 
     if backend == OPENLIBRARY_BACKEND:
         try:
@@ -240,9 +209,7 @@ def _search(
         # that fallback is not cached either, so a later live hit can replace it.
         return seed(query, limit=limit, offset=offset)
 
-    if len(_lookup_cache) >= _MAX_CACHE_ENTRIES:
-        _lookup_cache.clear()
-    _lookup_cache[cache_key] = (now, page)
+    _lookup_cache.set(cache_key, page)
     return page
 
 
@@ -321,7 +288,7 @@ def details_for_isbn(isbn: str) -> BookDetails | None:
                 return _seed_isbn(isbn)
         return details or _seed_isbn(isbn)
 
-    value = _cached_lookup(cache_key, fetch)
+    value = _lookup_cache.get_or_compute(cache_key, fetch)
     assert value is None or isinstance(value, BookDetails)
     return value
 
@@ -355,7 +322,7 @@ def author_profile(name: str) -> AuthorDetails | None:
             logger.warning("author profile lookup unavailable")
             return None
 
-    value = _cached_lookup(cache_key, fetch, cache_none=False)
+    value = _lookup_cache.get_or_compute(cache_key, fetch, cache_none=False)
     assert value is None or isinstance(value, AuthorDetails)
     return value
 
@@ -406,7 +373,7 @@ def books_in_category(category: str, *, limit: int = DEFAULT_LIMIT) -> list[Book
     # a search result, so a few minutes without them after a blip is acceptable
     # -- and caching spares the catalogue a fan-out of subject queries on every
     # shelf refresh.
-    value = _cached_lookup(cache_key, fetch)
+    value = _lookup_cache.get_or_compute(cache_key, fetch)
     assert isinstance(value, list)
     return value
 

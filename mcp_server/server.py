@@ -21,6 +21,7 @@ from collections.abc import Callable
 from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
+from app.cache import TTLCache
 from app.details import AuthorDetails, BookDetails, SearchPage
 from app.openlibrary import LookupUnavailable
 from app.openlibrary import find_similar_books as open_library_similar
@@ -39,6 +40,25 @@ MAX_SUBJECT_LENGTH = 100
 MAX_ISBN_LENGTH = 32
 MAX_RESULTS = 50
 DEFAULT_RESULTS = 5
+
+# The tools call Open Library directly rather than through ``app.lookup``, whose
+# backend dispatch would route an ``mcp`` backend straight back into these tools.
+# That keeps the layering right but leaves them outside the lookup module's
+# cache, so without this every tool call -- including repeated identical ones
+# from an external MCP client such as Claude Desktop or Inspector -- was a fresh
+# request to a catalogue that is often slow. Caching the normalized results here
+# spares the catalogue the repeat and answers the client immediately.
+#
+# The cache holds successful answers only: ``get_or_compute`` stores nothing when
+# the call raises, so an outage is retried on the next request rather than being
+# pinned for the whole TTL.
+_catalogue_cache = TTLCache()
+
+
+def clear_catalogue_cache() -> None:
+    """Drop every cached catalogue answer (test isolation, diagnostics)."""
+    _catalogue_cache.clear()
+
 
 mcp = FastMCP(
     name="Shelf Life",
@@ -173,13 +193,20 @@ def _search_result(
     if offset < 0:
         return _invalid("offset must not be negative.")
 
+    # ``field`` is what distinguishes one search tool from another, so it keys
+    # the cache: a title, author, subject, and similar-books query for the same
+    # string are four different questions.
+    cache_key = ("search", field, query, limit, offset)
     try:
-        page = search(query, limit=limit, offset=offset)
+        page = _catalogue_cache.get_or_compute(
+            cache_key, lambda: search(query, limit=limit, offset=offset)
+        )
     except LookupUnavailable:
         return _unavailable()
     except Exception:
         logger.exception("Unexpected failure in the %s search", field)
         return _unavailable()
+    assert isinstance(page, SearchPage)
 
     if not page.results:
         return ToolResult(
@@ -317,7 +344,9 @@ def get_book_details(isbn: str) -> ToolResult:
         return _invalid(f"isbn must be {MAX_ISBN_LENGTH} characters or fewer.")
 
     try:
-        book = open_library_details(key)
+        book = _catalogue_cache.get_or_compute(
+            ("book_details", key), lambda: open_library_details(key)
+        )
     except LookupUnavailable:
         return _unavailable()
     except Exception:
@@ -360,7 +389,14 @@ def get_author_details(name: str) -> ToolResult:
         )
 
     try:
-        author = open_library_author_details(query)
+        # An empty profile is not cached: on a slow catalogue it is usually a
+        # transient timeout rather than a settled "no such author", and pinning
+        # it would hide the author for the whole TTL after the service recovers.
+        author = _catalogue_cache.get_or_compute(
+            ("author_profile", query),
+            lambda: open_library_author_details(query),
+            cache_none=False,
+        )
     except LookupUnavailable:
         return ToolResult(
             content=(

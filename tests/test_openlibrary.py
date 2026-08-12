@@ -113,6 +113,58 @@ def test_search_by_subject_queries_the_subject_index(mock_openlibrary) -> None:
     ]
 
 
+def test_find_similar_books_resolves_subjects_then_excludes_the_source(
+    mock_openlibrary,
+) -> None:
+    """The source book's subject drives the search, and the book itself is dropped."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "fields=subject" in str(request.url):
+            # The subjects_for_isbn resolution step.
+            return httpx.Response(
+                200,
+                json={"numFound": 1, "docs": [{"subject": ["Science fiction", "Aliens"]}]},
+            )
+        # The subject search step.
+        return httpx.Response(
+            200,
+            json={
+                "numFound": 3,
+                "docs": [
+                    {
+                        "title": "Dune",
+                        "author_name": ["Frank Herbert"],
+                        "isbn": ["9780441013593"],
+                        "first_publish_year": 1965,
+                    },
+                    {"title": "Neuromancer", "author_name": ["William Gibson"], "isbn": ["9780441569595"]},
+                    {"title": "Foundation", "author_name": ["Isaac Asimov"], "isbn": ["9780553293357"]},
+                ],
+            },
+        )
+
+    mock_openlibrary(handler)
+
+    # Dune's own ISBN: Dune must be excluded from its own similar list.
+    page = openlibrary.find_similar_books("978-0-441-01359-3")
+
+    assert [book.title for book in page.results] == ["Neuromancer", "Foundation"]
+
+
+def test_find_similar_books_is_empty_when_the_book_has_no_subjects(
+    mock_openlibrary,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"numFound": 1, "docs": [{}]})
+
+    mock_openlibrary(handler)
+
+    page = openlibrary.find_similar_books("9780441013593")
+
+    assert page.results == []
+    assert page.total == 0
+
+
 def test_search_book_maps_a_real_search_response(mock_openlibrary) -> None:
     mock_openlibrary(json_route(SEARCH_DOC))
 

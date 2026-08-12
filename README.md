@@ -42,7 +42,7 @@ The application provides these Open Library functions:
 
 Open Library responses are converted into the application's internal `BookDetails`/`AuthorDetails` values before reaching the API routes or database.
 
-The course-required MCP server is implemented in `mcp_server/server.py`. It exposes the three required catalogue tools (`search_book`, `search_by_author`, `get_book_details`) plus `get_author_details` for the author profile, all as FastMCP tools. The FastAPI application calls these tools through `app/mcp_client.py` over FastMCP's in-memory transport, so the app and the MCP tools share one lookup path. External MCP clients can launch the server with `python -m mcp_server.server` (STDIO).
+The course-required MCP server is implemented in `mcp_server/server.py`. It exposes the three required catalogue tools (`search_book`, `search_by_author`, `get_book_details`) plus `get_author_details` for the author profile, and two discovery tools — `search_by_subject` (books filed under a genre or topic) and `find_similar_books` (more books like one ISBN, via its subjects) — all as FastMCP tools. The FastAPI application calls the four core tools through `app/mcp_client.py` over FastMCP's in-memory transport, so the app and the MCP tools share one lookup path. External MCP clients can launch the server with `python -m mcp_server.server` (STDIO).
 
 ## Technology Stack
 

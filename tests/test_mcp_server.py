@@ -81,10 +81,12 @@ def test_server_registers_both_searches_with_ai_facing_descriptions() -> None:
     described = {tool.name: tool.description for tool in tools}
 
     assert sorted(described) == [
+        "find_similar_books",
         "get_author_details",
         "get_book_details",
         "search_book",
         "search_by_author",
+        "search_by_subject",
     ]
     for description in described.values():
         assert "Use this tool when" in description
@@ -103,10 +105,12 @@ def test_server_starts_over_stdio_like_a_desktop_mcp_client() -> None:
     tools = asyncio.run(list_tools())
 
     assert sorted(tool.name for tool in tools) == [
+        "find_similar_books",
         "get_author_details",
         "get_book_details",
         "search_book",
         "search_by_author",
+        "search_by_subject",
     ]
 
 
@@ -439,6 +443,110 @@ def test_get_book_details_logs_the_exception_but_not_the_isbn(
     assert result.structured_content["status"] == "unavailable"
     assert "internal mapping bug" in caplog.text
     assert "9780261103344" not in caplog.text
+
+
+def call_search_by_subject(subject: str):
+    """Call the subject tool and return its complete protocol result."""
+
+    async def call():
+        async with Client(server.mcp) as client:
+            return await client.call_tool(
+                "search_by_subject",
+                {"subject": subject},
+                raise_on_error=False,
+            )
+
+    return asyncio.run(call())
+
+
+def call_find_similar_books(isbn: str):
+    """Call the similar-books tool and return its complete protocol result."""
+
+    async def call():
+        async with Client(server.mcp) as client:
+            return await client.call_tool(
+                "find_similar_books",
+                {"isbn": isbn},
+                raise_on_error=False,
+            )
+
+    return asyncio.run(call())
+
+
+def test_search_by_subject_returns_readable_normalized_results(monkeypatch) -> None:
+    results = [
+        BookDetails(title="Dune", author="Frank Herbert", isbn="9780441013593", year=1965),
+        BookDetails(title="Neuromancer", author="William Gibson", isbn="9780441569595"),
+    ]
+    monkeypatch.setattr(
+        server,
+        "search_open_library_subject",
+        lambda subject, **paging: SearchPage(results=results, total=len(results)),
+    )
+
+    result = call_search_by_subject("  science fiction  ")
+    text = result.content[0].text
+
+    assert text.startswith('Found 2 books filed under "science fiction":')
+    assert "1. Dune" in text
+    assert "ISBN: 9780441013593" in text
+    assert result.structured_content["status"] == "ok"
+    assert result.structured_content["books"][0]["title"] == "Dune"
+
+
+def test_search_by_subject_rejects_a_blank_subject_without_a_lookup(monkeypatch) -> None:
+    def fail_if_called(subject: str, **paging):
+        raise AssertionError("blank input must not call Open Library")
+
+    monkeypatch.setattr(server, "search_open_library_subject", fail_if_called)
+
+    assert (
+        call_search_by_subject("   ").content[0].text
+        == "Error: subject must not be blank."
+    )
+
+
+def test_find_similar_books_returns_readable_normalized_results(monkeypatch) -> None:
+    results = [
+        BookDetails(title="Foundation", author="Isaac Asimov", isbn="9780553293357"),
+    ]
+    monkeypatch.setattr(
+        server,
+        "open_library_similar",
+        lambda isbn, **paging: SearchPage(results=results, total=1),
+    )
+
+    result = call_find_similar_books("9780441013593")
+    text = result.content[0].text
+
+    assert text.startswith('Found 1 books similar to "9780441013593":')
+    assert "1. Foundation" in text
+    assert result.structured_content["status"] == "ok"
+    assert result.structured_content["books"][0]["isbn"] == "9780553293357"
+
+
+def test_find_similar_books_reports_no_match_for_a_subjectless_book(monkeypatch) -> None:
+    """A book with no usable subject yields an empty page, not an error."""
+    monkeypatch.setattr(
+        server, "open_library_similar", lambda isbn, **paging: SearchPage([], 0)
+    )
+
+    assert (
+        call_find_similar_books("9780000000000").content[0].text
+        == 'No books found similar to "9780000000000".'
+    )
+
+
+def test_find_similar_books_hides_catalogue_failures_from_the_client(monkeypatch) -> None:
+    def unavailable(isbn: str, **paging):
+        raise LookupUnavailable("internal network details")
+
+    monkeypatch.setattr(server, "open_library_similar", unavailable)
+
+    text = call_find_similar_books("9780441013593").content[0].text
+
+    assert "temporarily unavailable" in text
+    assert "internal network details" not in text
 
 
 def test_get_author_details_logs_the_exception_but_not_the_name(

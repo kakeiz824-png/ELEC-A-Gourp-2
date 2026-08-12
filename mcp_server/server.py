@@ -7,11 +7,12 @@ Run this module from the repository root with::
 FastMCP uses the STDIO transport by default, which lets MCP Inspector and
 desktop MCP clients launch the server as a local subprocess.
 
-Three tools are exposed. The two searches page through the catalogue, because
-the browser lists every match rather than the first handful, and an author like
+Six tools are exposed. The searches page through the catalogue, because the
+browser lists every match rather than the first handful, and an author like
 J. K. Rowling has hundreds. ``get_book_details`` resolves one ISBN, which is how
 an add is confirmed: the ISBN identifies the book, so nothing has to trust
-metadata a client sent.
+metadata a client sent. ``search_by_subject`` and ``find_similar_books`` answer
+"more books like these", the basis of category browsing and recommendations.
 """
 
 import logging
@@ -22,16 +23,19 @@ from fastmcp.tools.tool import ToolResult
 
 from app.details import AuthorDetails, BookDetails, SearchPage
 from app.openlibrary import LookupUnavailable
+from app.openlibrary import find_similar_books as open_library_similar
 from app.openlibrary import get_author_details as open_library_author_details
 from app.openlibrary import get_book_details as open_library_details
 from app.openlibrary import search_author as search_open_library_author
 from app.openlibrary import search_book as search_open_library
+from app.openlibrary import search_by_subject as search_open_library_subject
 
 
 logger = logging.getLogger(__name__)
 
 MAX_TITLE_LENGTH = 300
 MAX_AUTHOR_LENGTH = 300
+MAX_SUBJECT_LENGTH = 100
 MAX_ISBN_LENGTH = 32
 MAX_RESULTS = 50
 DEFAULT_RESULTS = 5
@@ -42,8 +46,10 @@ mcp = FastMCP(
         "Search the public Open Library catalogue for books. "
         "Use search_book when a user knows a full or partial book title, "
         "search_by_author when a user names a writer and wants the books that "
-        "writer wrote, get_book_details to resolve one ISBN, and "
-        "get_author_details to fetch a writer's biography and dates."
+        "writer wrote, search_by_subject when a user names a genre or topic, "
+        "find_similar_books when a user has one book's ISBN and wants more like "
+        "it, get_book_details to resolve one ISBN, and get_author_details to "
+        "fetch a writer's biography and dates."
     ),
 )
 
@@ -242,6 +248,54 @@ def search_by_author(
         max_length=MAX_AUTHOR_LENGTH,
         phrase="written by",
         search=search_open_library_author,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@mcp.tool
+def search_by_subject(
+    subject: str, limit: int = DEFAULT_RESULTS, offset: int = 0
+) -> ToolResult:
+    """Search Open Library for books filed under a subject.
+
+    Use this tool when the user names a genre, topic, or category -- for example
+    "science fiction", "history", or "cooking" -- and wants books on it rather
+    than one specific title or author. It returns readable results with author,
+    first publication year, ISBN, and cover information when available, plus how
+    many matches exist in total. Raise `offset` by `limit` to read the next page.
+    """
+    return _search_result(
+        subject,
+        field="subject",
+        max_length=MAX_SUBJECT_LENGTH,
+        phrase="filed under",
+        search=search_open_library_subject,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@mcp.tool
+def find_similar_books(
+    isbn: str, limit: int = DEFAULT_RESULTS, offset: int = 0
+) -> ToolResult:
+    """Find books similar to the one that carries an ISBN.
+
+    Use this tool when the user has one specific book -- identified by its ISBN --
+    and wants more like it. The book's own subjects are resolved from the
+    catalogue and used to find others on the same subject, with the original book
+    left out of the results. It returns readable results with author, first
+    publication year, ISBN, and cover when available. A book the catalogue files
+    under no subject, or an ISBN it does not know, yields no matches rather than
+    an error.
+    """
+    return _search_result(
+        isbn,
+        field="isbn",
+        max_length=MAX_ISBN_LENGTH,
+        phrase="similar to",
+        search=open_library_similar,
         limit=limit,
         offset=offset,
     )

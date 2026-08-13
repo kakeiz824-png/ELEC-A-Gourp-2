@@ -77,6 +77,43 @@ let currentTag = null;
 /** Category suggestions per book, fetched once per session. */
 const suggestionCache = new Map();
 
+/** Recent page-one search results kept locally for instant repeat searches. */
+const SEARCH_CACHE_KEY = "shelf-life-search-cache";
+const SEARCH_CACHE_MAX = 8;
+
+function searchCacheKey(mode, query) {
+  return `${mode}:${query.trim().toLowerCase()}`;
+}
+
+function loadCachedSearch(mode, query) {
+  try {
+    const raw = localStorage.getItem(SEARCH_CACHE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const store = JSON.parse(raw);
+    return store[searchCacheKey(mode, query)] || null;
+  } catch {
+    // Storage unavailable or corrupt: fall back to a live search.
+    return null;
+  }
+}
+
+function rememberSearch(mode, query, results) {
+  try {
+    const raw = localStorage.getItem(SEARCH_CACHE_KEY);
+    const store = raw ? JSON.parse(raw) : {};
+    store[searchCacheKey(mode, query)] = results;
+    const keys = Object.keys(store);
+    while (keys.length > SEARCH_CACHE_MAX) {
+      delete store[keys.shift()];
+    }
+    localStorage.setItem(SEARCH_CACHE_KEY, JSON.stringify(store));
+  } catch {
+    // Storage full or unavailable: repeat searches simply go live again.
+  }
+}
+
 function getTagSuggestions(bookId) {
   if (!suggestionCache.has(bookId)) {
     const promise = api(`/books/${bookId}/tag-suggestions`)
@@ -654,6 +691,19 @@ async function loadRecommendations() {
   }
 }
 
+/** Demo queries warmed server-side so the live search feels instant. */
+const WARMUP_REQUESTS = [
+  "/books/search?title=Three%20Body&page=1",
+  "/books/search?author=Liu%20Cixin&page=1",
+  "/books/search?title=The%20Hobbit&page=1",
+  "/authors?name=Liu%20Cixin",
+];
+
+async function warmUpDemoSearches() {
+  // Best-effort: a slow or offline catalogue must not disturb the UI.
+  await Promise.allSettled(WARMUP_REQUESTS.map((path) => api(path)));
+}
+
 /** Reload every shelf and the statistics bar from the API. */
 async function refresh() {
   const [books, stats, tags] = await Promise.all([
@@ -687,13 +737,20 @@ async function refresh() {
 /** True while a search is in flight, so a double click cannot fetch twice. */
 let searching = false;
 
-async function runSearch(mode, query, page) {
+async function runSearch(mode, query, page, revalidate = false) {
   if (searching) {
     return;
   }
   searching = true;
   addButton.disabled = true;
-  setHint(page > 1 ? `Loading page ${page}…` : `Searching for "${query}"…`, "working");
+  setHint(
+    revalidate
+      ? `Refreshing results for "${query}"…`
+      : page > 1
+        ? `Loading page ${page}…`
+        : `Searching for "${query}"…`,
+    "working",
+  );
 
   try {
     const results = await api(
@@ -701,6 +758,9 @@ async function runSearch(mode, query, page) {
     );
     // Trust the page the server reports, not the one that was asked for.
     currentSearch = { mode, query, page: results.page };
+    if (page === 1) {
+      rememberSearch(mode, query, results);
+    }
     renderSearchResults(results);
     const otherMode = mode === "title" ? "author" : "title";
     searchEmptyMessage.textContent =
@@ -743,8 +803,19 @@ if (addForm) {
     }
 
     const mode = searchMode.value;
-    clearSearchResults();
-    await runSearch(mode, query, 1);
+    clearAuthorProfile();
+    const cached = loadCachedSearch(mode, query);
+    if (cached && cached.items && cached.items.length > 0) {
+      // Show the last-known results immediately, then refresh in the
+      // background so a repeat search never blanks the page.
+      currentSearch = { mode, query, page: cached.page || 1 };
+      renderSearchResults(cached);
+      await runSearch(mode, query, 1, true);
+    } else {
+      // A brand-new query keeps whatever is on screen while it loads.
+      setHint(`Searching for "${query}"…`, "working");
+      await runSearch(mode, query, 1);
+    }
   });
 
   prevPageButton.addEventListener("click", () => {
@@ -771,4 +842,5 @@ if (addForm) {
   refresh().catch(() => {
     setHint("Could not load your shelves. Check the API and reload.", "error");
   });
+  warmUpDemoSearches();
 }

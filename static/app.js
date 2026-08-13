@@ -74,6 +74,19 @@ let currentSearch = null;
 /** The tag the shelves are filtered to, or null for all books. */
 let currentTag = null;
 
+/** Category suggestions per book, fetched once per session. */
+const suggestionCache = new Map();
+
+function getTagSuggestions(bookId) {
+  if (!suggestionCache.has(bookId)) {
+    const promise = api(`/books/${bookId}/tag-suggestions`)
+      .then((data) => data.categories || [])
+      .catch(() => []);
+    suggestionCache.set(bookId, promise);
+  }
+  return suggestionCache.get(bookId);
+}
+
 /** Fetch JSON and raise on any non-2xx so callers only handle one failure path. */
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -426,13 +439,14 @@ function buildCard(book) {
 
   async function loadSuggestions() {
     suggestionsContainer.replaceChildren();
-    let subjects = [];
-    try {
-      const data = await api(`/books/${book.id}/tag-suggestions`);
-      subjects = data.categories || [];
-    } catch (_error) {
-      subjects = []; // suggestions are best-effort; never block editing
-    }
+    const loading = document.createElement("span");
+    loading.className = "tag-suggestions-label";
+    loading.textContent = "Loading suggestions…";
+    suggestionsContainer.appendChild(loading);
+
+    const subjects = await getTagSuggestions(book.id);
+
+    suggestionsContainer.replaceChildren();
     if (subjects.length === 0) {
       return;
     }

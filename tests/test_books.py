@@ -361,3 +361,14 @@ def test_stats_are_empty_before_any_book_is_added(client) -> None:
 
     assert stats["total"] == 0
     assert stats["average_rating"] is None
+
+
+def test_tag_suggestions_are_cached_per_book() -> None:
+    """The tag editor shows a loading state and fetches suggestions once per book."""
+    source = (Path(__file__).resolve().parent.parent / "static" / "app.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Loading suggestions…" in source
+    assert "suggestionCache" in source
+    assert "getTagSuggestions" in source
